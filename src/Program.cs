@@ -244,13 +244,14 @@ namespace SnowDesk
                 frameSurface = new FrameSurface(size);
             }
 
+            Drawing.Rectangle dashboardBounds = DashboardBounds();
             bool needsGeometry = overlays.Exists(item => item.Scene.UsesWindowGeometry(settings));
             var geometry = needsGeometry ? Desktop.ReadWindows(ShellChanged, shellFocus) : new List<Desktop.WindowBounds>();
             foreach (Overlay overlay in overlays)
             {
                 if (overlay.DisplayName == fullscreen) continue;
                 overlay.Scene.UpdateLedges(geometry);
-                overlay.Reveal(frameSurface);
+                overlay.Reveal(frameSurface, dashboardBounds);
                 var popup = geometry.Find(item => item.IsShellPopup && overlay.Contains(new Desktop.Point
                 {
                     X = (int)(item.Bounds.Left + item.Bounds.Width * 0.5), Y = (int)item.Bounds.Top
@@ -284,6 +285,7 @@ namespace SnowDesk
             double elapsed = Math.Max(0, Math.Min(0.12, now - lastFrame));
             lastFrame = now;
             Desktop.GetCursorPos(out cursor);
+            Drawing.Rectangle dashboardBounds = DashboardBounds();
             foreach (Overlay overlay in overlays)
             {
                 if (!overlay.IsVisible) continue;
@@ -291,9 +293,15 @@ namespace SnowDesk
                 if (snow != null && snow.IsHoldingTree)
                     snow.DragTree(cursor, elapsed, Desktop.PrimaryButtonDown());
                 overlay.Scene.Advance(elapsed, settings, cursor);
-                overlay.RenderFrame(frameSurface);
-                overlay.UpdateTreeTarget();
+                overlay.RenderFrame(frameSurface, dashboardBounds);
+                overlay.UpdateTreeTarget(dashboardBounds);
             }
+        }
+
+        private Drawing.Rectangle DashboardBounds()
+        {
+            return dashboard != null && dashboard.Visible && dashboard.WindowState != Forms.FormWindowState.Minimized
+                ? dashboard.Bounds : Drawing.Rectangle.Empty;
         }
 
         internal Settings Preferences { get { return settings; } }

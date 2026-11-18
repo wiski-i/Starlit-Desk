@@ -11,7 +11,7 @@ namespace SnowDesk
     {
         private static readonly int[] Rates = { 20, 30, 60 };
         private readonly Program app;
-        private readonly DeskCard hero;
+        private readonly DeskThemePreview themePreview;
         private readonly Settings settings;
         private readonly List<Action> updateChecks = new List<Action>();
         private readonly ComboBox themes, density, rate;
@@ -63,12 +63,16 @@ namespace SnowDesk
             header.Controls.Add(brand, 1, 0);
             body.Controls.Add(header);
 
-            hero = new DeskCard(true) { Dock = DockStyle.Top, Height = 137 };
+            var hero = new DeskCard(true) { Dock = DockStyle.Top, Height = 137 };
             body.Controls.Add(hero);
-            var heroGrid = DeskStyle.Flow(2);
+            var heroGrid = DeskStyle.Flow(3);
+            heroGrid.AutoSize = false;
             heroGrid.Dock = DockStyle.Fill;
-            heroGrid.ColumnStyles[0] = new ColumnStyle(SizeType.Percent, 72);
-            heroGrid.ColumnStyles[1] = new ColumnStyle(SizeType.Percent, 28);
+            heroGrid.ColumnStyles[0] = new ColumnStyle(SizeType.Percent, 35);
+            heroGrid.ColumnStyles[1] = new ColumnStyle(SizeType.Percent, 65);
+            heroGrid.ColumnStyles[2] = new ColumnStyle(SizeType.AutoSize);
+            heroGrid.RowCount = 1;
+            heroGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             hero.Controls.Add(heroGrid);
             var heroCopy = DeskStyle.Flow(1);
             heroCopy.Controls.Add(DeskStyle.Copy("Seçili tema"));
@@ -76,10 +80,12 @@ namespace SnowDesk
             heroCopy.Controls.Add(intro);
             heroCopy.Controls.Add(status = DeskStyle.Copy(""));
             heroGrid.Controls.Add(heroCopy, 0, 0);
+            themePreview = new DeskThemePreview();
+            heroGrid.Controls.Add(themePreview, 1, 0);
             pause = DeskStyle.Button("", true);
             pause.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
             pause.Click += (sender, e) => app.ToggleScene();
-            heroGrid.Controls.Add(pause, 1, 0);
+            heroGrid.Controls.Add(pause, 2, 0);
 
             var settingsRow = DeskStyle.Flow(2);
             settingsRow.ColumnStyles[0] = new ColumnStyle(SizeType.Percent, 42);
@@ -186,8 +192,8 @@ namespace SnowDesk
 
         private void UpdatePreview()
         {
-            if (hero != null)
-                hero.SetPreview(settings,
+            if (themePreview != null)
+                themePreview.SetPreview(settings,
                     foreground && Visible && app.IsRunning && WindowState != FormWindowState.Minimized);
         }
 

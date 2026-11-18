@@ -28,15 +28,15 @@ namespace SnowDesk
             Scene = theme.CreateScene(display);
         }
 
-        internal void Reveal(FrameSurface frame)
+        internal void Reveal(FrameSurface frame, Rectangle dashboard)
         {
             if (IsVisible) return;
-            if (window == IntPtr.Zero) Open(frame);
+            if (window == IntPtr.Zero) Open(frame, dashboard);
             ShowWindow(window, 4); // SW_SHOWNOACTIVATE.
             IsVisible = true;
         }
 
-        private void Open(FrameSurface frame)
+        private void Open(FrameSurface frame, Rectangle dashboard)
         {
             Rectangle bounds = screen.Bounds;
             try
@@ -46,7 +46,7 @@ namespace SnowDesk
                     "Static", "Starlit Desk Overlay", Popup, bounds.X, bounds.Y, bounds.Width, bounds.Height,
                     IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
                 if (window == IntPtr.Zero) throw new Win32Exception();
-                RenderFrame(frame);
+                RenderFrame(frame, dashboard);
             }
             catch
             {
@@ -87,7 +87,7 @@ namespace SnowDesk
             wasOnDesktop = onDesktop;
         }
 
-        internal void UpdateTreeTarget()
+        internal void UpdateTreeTarget(Rectangle dashboard)
         {
             System.Windows.Rect grip;
             double visibleBottom;
@@ -96,19 +96,28 @@ namespace SnowDesk
                 if (treeTarget != null) treeTarget.Place(Rectangle.Empty);
                 return;
             }
-            if (treeTarget == null)
-            {
-                treeTarget = new TreeTarget(window, Snow.GrabTree);
-            }
             var bounds = new Rectangle((int)Math.Round(grip.X), (int)Math.Round(grip.Y),
                 (int)Math.Round(grip.Width), (int)Math.Round(grip.Height));
+            if (bounds.IntersectsWith(dashboard))
+            {
+                if (treeTarget != null) treeTarget.Place(Rectangle.Empty);
+                return;
+            }
+            if (treeTarget == null)
+                treeTarget = new TreeTarget(window, Snow.GrabTree);
             treeTarget.Place(bounds, (int)Math.Ceiling(visibleBottom) - bounds.Top);
         }
 
-        internal void RenderFrame(FrameSurface frame)
+        internal void RenderFrame(FrameSurface frame, Rectangle dashboard)
         {
             Rectangle bounds = screen.Bounds;
             frame.Canvas.BeginFrame(bounds.Width, bounds.Height);
+            Rectangle blocked = Rectangle.Intersect(bounds, dashboard);
+            if (blocked.Width > 0 && blocked.Height > 0)
+            {
+                blocked.Offset(-bounds.X, -bounds.Y);
+                frame.Canvas.Exclude(blocked);
+            }
             Scene.Draw(frame.Canvas);
             frame.Canvas.Flush();
             var destination = new Desktop.Point { X = bounds.X, Y = bounds.Y };

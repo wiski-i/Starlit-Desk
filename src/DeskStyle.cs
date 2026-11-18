@@ -14,6 +14,8 @@ namespace SnowDesk
         internal static readonly Color Text = Color.FromArgb(250, 235, 241);
         internal static readonly Color Muted = Color.FromArgb(216, 176, 195);
         internal static readonly Color Accent = Color.FromArgb(249, 179, 204);
+        internal const TextFormatFlags PreserveTextBounds = TextFormatFlags.PreserveGraphicsClipping |
+            TextFormatFlags.PreserveGraphicsTranslateTransform;
 
         internal static TableLayoutPanel Flow(int columns)
         {
@@ -112,7 +114,8 @@ namespace SnowDesk
                 graphics.DrawPath(edge, shape);
             }
             TextRenderer.DrawText(graphics, Text, Font, ClientRectangle, ForeColor,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine |
+                DeskStyle.PreserveTextBounds);
         }
     }
 
@@ -183,7 +186,8 @@ namespace SnowDesk
         {
             bounds.Inflate(-7, 0);
             TextRenderer.DrawText(graphics, value, Font, bounds, ForeColor,
-                TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+                TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis |
+                DeskStyle.PreserveTextBounds);
         }
     }
 
@@ -223,7 +227,7 @@ namespace SnowDesk
             }
 
             var textBounds = new Rectangle(size + 6, 0, Math.Max(0, Width - size - 6), Height);
-            TextRenderer.DrawText(graphics, Text, Font, textBounds, ForeColor, TextFlags | TextFormatFlags.EndEllipsis);
+            TextRenderer.DrawText(graphics, Text, Font, textBounds, ForeColor, TextFlags | TextFormatFlags.EndEllipsis | DeskStyle.PreserveTextBounds);
             if (Focused && ShowFocusCues)
                 ControlPaint.DrawFocusRectangle(graphics, ClientRectangle, DeskStyle.Accent, DeskStyle.Surface);
         }
@@ -238,22 +242,61 @@ namespace SnowDesk
     internal sealed class DeskCard : Panel
     {
         private readonly bool hero;
-        private readonly Timer previewClock;
-        private ThemePreview preview;
-        private DesktopTheme previewTheme;
-        private Settings previewSettings;
-        private bool previewPlaying;
 
         internal DeskCard(bool hero)
         {
             this.hero = hero;
-            if (hero) previewClock = new Timer { Interval = 40 };
-            if (previewClock != null) previewClock.Tick += AdvancePreview;
             BackColor = DeskStyle.Background;
             Padding = new Padding(17, 13, 17, 13);
             Margin = new Padding(0, 0, 0, 12);
             DoubleBuffered = true;
             ResizeRedraw = true;
+        }
+
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+            base.OnPaintBackground(e);
+            if (Width < 44 || Height < 44) return;
+            Graphics graphics = e.Graphics;
+            graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            var bounds = new Rectangle(1, 1, Width - 3, Height - 3);
+            using (GraphicsPath outline = DeskStyle.Rounded(bounds, hero ? 20 : 17))
+            using (var border = new Pen(DeskStyle.Border))
+            {
+                if (hero)
+                {
+                    using (var fill = new LinearGradientBrush(bounds, DeskStyle.Surface,
+                        Color.FromArgb(77, 36, 58), 14f))
+                        graphics.FillPath(fill, outline);
+                }
+                else
+                {
+                    using (var fill = new SolidBrush(DeskStyle.Surface))
+                        graphics.FillPath(fill, outline);
+                }
+                graphics.DrawPath(border, outline);
+            }
+        }
+
+    }
+
+    internal sealed class DeskThemePreview : Control
+    {
+        private readonly Timer previewClock = new Timer { Interval = 40 };
+        private ThemePreview preview;
+        private DesktopTheme previewTheme;
+        private Settings previewSettings;
+        private bool previewPlaying;
+
+        internal DeskThemePreview()
+        {
+            SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw, true);
+            BackColor = Color.Transparent;
+            Dock = DockStyle.Fill;
+            Margin = new Padding(4, 0, 10, 0);
+            TabStop = false;
+            previewClock.Tick += AdvancePreview;
         }
 
         internal void SetPreview(Settings settings, bool playing)
@@ -266,7 +309,7 @@ namespace SnowDesk
                 if (preview != null) preview.Dispose();
                 preview = theme.CreatePreview == null ? null : theme.CreatePreview();
                 previewTheme = theme;
-                Invalidate(true);
+                Invalidate();
             }
             previewPlaying = playing;
             UpdatePreviewPlayback();
@@ -293,64 +336,43 @@ namespace SnowDesk
                 return;
             }
             preview.Advance(previewClock.Interval / 1000.0, previewSettings);
-            int left = Width * 36 / 100;
-            Invalidate(new Rectangle(left, 0, Width - left, Height), true);
+            Invalidate();
         }
 
-        private void DrawPreview(Graphics graphics, Rectangle bounds)
+        protected override void OnPaint(PaintEventArgs e)
         {
-            int left = bounds.Left + bounds.Width * 36 / 100;
-            var imageArea = Rectangle.FromLTRB(left, bounds.Top, bounds.Right, bounds.Bottom);
-            preview.Draw(graphics, imageArea);
-            var fadeArea = new Rectangle(left - 1, bounds.Top, imageArea.Width / 4, bounds.Height);
-            using (var fade = new LinearGradientBrush(fadeArea, Color.FromArgb(48, 25, 40),
-                Color.FromArgb(0, 48, 25, 40), LinearGradientMode.Horizontal))
-                graphics.FillRectangle(fade, fadeArea);
+            if (Width < 24 || Height < 24) return;
+            Graphics graphics = e.Graphics;
+            graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            if (preview == null)
+            {
+                DrawConstellation(graphics, ClientRectangle);
+                return;
+            }
+            var bounds = new Rectangle(0, 0, Width - 1, Height - 1);
+            using (GraphicsPath shape = DeskStyle.Rounded(bounds, 12))
+            {
+                GraphicsState previous = graphics.Save();
+                graphics.SetClip(shape, CombineMode.Intersect);
+                preview.Draw(graphics, bounds);
+                graphics.Restore(previous);
+            }
         }
 
         protected override void Dispose(bool disposing)
         {
             if (disposing)
             {
-                if (previewClock != null) previewClock.Dispose();
+                previewPlaying = false;
+                previewClock.Dispose();
                 if (preview != null) preview.Dispose();
             }
             base.Dispose(disposing);
         }
 
-        protected override void OnPaintBackground(PaintEventArgs e)
-        {
-            base.OnPaintBackground(e);
-            if (Width < 44 || Height < 44) return;
-            Graphics graphics = e.Graphics;
-            graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            var bounds = new Rectangle(1, 1, Width - 3, Height - 3);
-            using (GraphicsPath outline = DeskStyle.Rounded(bounds, hero ? 20 : 17))
-            using (var border = new Pen(DeskStyle.Border))
-            {
-                if (hero)
-                {
-                    using (var fill = new LinearGradientBrush(bounds, DeskStyle.Surface,
-                        Color.FromArgb(77, 36, 58), 14f))
-                        graphics.FillPath(fill, outline);
-                    GraphicsState previous = graphics.Save();
-                    graphics.SetClip(outline);
-                    if (preview == null) DrawConstellation(graphics, bounds);
-                    else DrawPreview(graphics, bounds);
-                    graphics.Restore(previous);
-                }
-                else
-                {
-                    using (var fill = new SolidBrush(DeskStyle.Surface))
-                        graphics.FillPath(fill, outline);
-                }
-                graphics.DrawPath(border, outline);
-            }
-        }
-
         private static void DrawConstellation(Graphics graphics, Rectangle bounds)
         {
-            float x = bounds.Width * 0.73f, y = bounds.Height * 0.48f;
+            float x = bounds.Width * 0.63f, y = bounds.Height * 0.48f;
             using (var orbit = new Pen(Color.FromArgb(71, DeskStyle.Accent), 1f))
             using (var starlight = new SolidBrush(Color.FromArgb(155, DeskStyle.Accent)))
             using (var dust = new SolidBrush(Color.FromArgb(90, DeskStyle.Accent)))

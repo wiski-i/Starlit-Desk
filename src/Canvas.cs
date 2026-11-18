@@ -40,6 +40,8 @@ namespace SnowDesk
                 graphics.CompositingMode = CompositingMode.SourceOver;
             }
         }
+        internal void Exclude(Rectangle bounds) { graphics.ExcludeClip(bounds); }
+
         internal void Flush() { graphics.Flush(FlushIntention.Sync); }
         public void Dispose() { graphics.Dispose(); }
 
