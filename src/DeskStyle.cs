@@ -14,15 +14,13 @@ namespace SnowDesk
         internal static readonly Color Text = Color.FromArgb(250, 235, 241);
         internal static readonly Color Muted = Color.FromArgb(216, 176, 195);
         internal static readonly Color Accent = Color.FromArgb(249, 179, 204);
-        internal const TextFormatFlags PreserveTextBounds = TextFormatFlags.PreserveGraphicsClipping |
-            TextFormatFlags.PreserveGraphicsTranslateTransform;
 
         internal static TableLayoutPanel Flow(int columns)
         {
             var layout = new TableLayoutPanel
             {
                 ColumnCount = columns, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                Dock = DockStyle.Top, Margin = Padding.Empty, BackColor = Color.Transparent
+                Dock = DockStyle.Top, Margin = Padding.Empty
             };
             for (int index = 0; index < columns; index++)
                 layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / columns));
@@ -33,7 +31,7 @@ namespace SnowDesk
         {
             return new Label
             {
-                Text = text, AutoSize = true, BackColor = Color.Transparent, ForeColor = Text,
+                Text = text, AutoSize = true, UseCompatibleTextRendering = true, ForeColor = Text,
                 Margin = Padding.Empty, Font = new Font("Segoe UI", size, FontStyle.Bold)
             };
         }
@@ -42,7 +40,7 @@ namespace SnowDesk
         {
             return new Label
             {
-                Text = text, AutoSize = true, BackColor = Color.Transparent, ForeColor = Muted,
+                Text = text, AutoSize = true, UseCompatibleTextRendering = true, ForeColor = Muted,
                 Margin = new Padding(0, 2, 0, 2)
             };
         }
@@ -51,7 +49,26 @@ namespace SnowDesk
 
         internal static Button Button(string text, bool primary)
         {
-            return new DeskButton(text, primary);
+            var button = new Button
+            {
+                Text = text, Width = 118, Height = 32, Margin = Padding.Empty,
+                UseVisualStyleBackColor = false, UseCompatibleTextRendering = true,
+                FlatStyle = FlatStyle.Flat, BackColor = primary ? Accent : Input,
+                ForeColor = primary ? Background : Text
+            };
+            button.FlatAppearance.BorderSize = 0;
+            button.FlatAppearance.MouseOverBackColor = primary ? Color.FromArgb(255, 205, 224) : Border;
+            button.Resize += (sender, e) => RoundButton(button);
+            RoundButton(button);
+            return button;
+        }
+
+        private static void RoundButton(Button button)
+        {
+            int radius = Math.Min(8, Math.Min(button.Width, button.Height) / 2);
+            if (radius == 0) return;
+            using (GraphicsPath shape = Rounded(button.ClientRectangle, radius))
+                button.Region = new Region(shape);
         }
 
         internal static GraphicsPath Rounded(Rectangle bounds, int radius)
@@ -70,52 +87,12 @@ namespace SnowDesk
         {
             var card = new DeskCard(false) { Height = height, Dock = DockStyle.Top };
             var content = Flow(1);
+            content.BackColor = Surface;
             Label heading = Title(title, 13);
             heading.Margin = new Padding(0, 0, 0, 10);
             content.Controls.Add(heading);
             card.Controls.Add(content);
             return card;
-        }
-    }
-
-    internal sealed class DeskButton : Button
-    {
-        private readonly bool primary;
-
-        internal DeskButton(string text, bool primary)
-        {
-            this.primary = primary;
-            Text = text;
-            Width = 118;
-            Height = 32;
-            Margin = Padding.Empty;
-            UseVisualStyleBackColor = false;
-            FlatStyle = FlatStyle.Flat;
-            BackColor = Color.Transparent;
-            ForeColor = primary ? DeskStyle.Background : DeskStyle.Text;
-        }
-
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            Graphics graphics = e.Graphics;
-            graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            bool hover = ClientRectangle.Contains(PointToClient(MousePosition));
-            Color normal = primary ? DeskStyle.Accent : DeskStyle.Input;
-            Color hoverColor = primary ? Color.FromArgb(255, 205, 224) : DeskStyle.Border;
-            Color stroke = Focused && ShowFocusCues
-                ? (primary ? DeskStyle.Background : DeskStyle.Accent)
-                : (primary ? normal : DeskStyle.Border);
-            var bounds = new Rectangle(1, 1, Width - 3, Height - 3);
-            using (GraphicsPath shape = DeskStyle.Rounded(bounds, 8))
-            using (var fill = new SolidBrush(hover ? hoverColor : normal))
-            using (var edge = new Pen(stroke))
-            {
-                graphics.FillPath(fill, shape);
-                graphics.DrawPath(edge, shape);
-            }
-            TextRenderer.DrawText(graphics, Text, Font, ClientRectangle, ForeColor,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine |
-                DeskStyle.PreserveTextBounds);
         }
     }
 
@@ -139,103 +116,15 @@ namespace SnowDesk
             bool active = (e.State & DrawItemState.Selected) != 0;
             using (var fill = new SolidBrush(active ? DeskStyle.Border : BackColor))
                 e.Graphics.FillRectangle(fill, e.Bounds);
-            if (e.Index >= 0) DrawText(e.Graphics, GetItemText(Items[e.Index]), e.Bounds);
+            if (e.Index >= 0)
+            {
+                Rectangle text = e.Bounds;
+                text.Inflate(-5, 0);
+                TextRenderer.DrawText(e.Graphics, GetItemText(Items[e.Index]), Font, text, ForeColor,
+                    TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis |
+                    TextFormatFlags.PreserveGraphicsClipping | TextFormatFlags.PreserveGraphicsTranslateTransform);
+            }
             e.DrawFocusRectangle();
-        }
-
-        protected override void WndProc(ref Message message)
-        {
-            base.WndProc(ref message);
-            const int Paint = 0x000F, Print = 0x0317, PrintClient = 0x0318;
-            if (message.Msg == Paint)
-            {
-                using (Graphics graphics = Graphics.FromHwnd(Handle)) DrawField(graphics);
-            }
-            else if ((message.Msg == Print || message.Msg == PrintClient) && message.WParam != IntPtr.Zero)
-            {
-                using (Graphics graphics = Graphics.FromHdc(message.WParam)) DrawField(graphics);
-            }
-        }
-
-        private void DrawField(Graphics graphics)
-        {
-            Rectangle bounds = ClientRectangle;
-            if (bounds.Width < 32 || bounds.Height < 14) return;
-            int arrowWidth = Math.Max(20, bounds.Height);
-            graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            var field = new Rectangle(0, 0, bounds.Width - 1, bounds.Height - 1);
-            using (var behind = new SolidBrush(DeskStyle.Surface))
-            using (GraphicsPath shape = DeskStyle.Rounded(field, 6))
-            using (var fill = new SolidBrush(BackColor))
-            using (var edge = new Pen(Focused ? DeskStyle.Accent : DeskStyle.Border))
-            using (var arrow = new Pen(DeskStyle.Muted, 1.5f))
-            {
-                graphics.FillRectangle(behind, bounds);
-                graphics.FillPath(fill, shape);
-                graphics.DrawPath(edge, shape);
-                graphics.DrawLine(edge, bounds.Right - arrowWidth, 5, bounds.Right - arrowWidth, bounds.Bottom - 6);
-                int x = bounds.Right - arrowWidth / 2, y = bounds.Height / 2;
-                graphics.DrawLines(arrow, new[] { new Point(x - 4, y - 2), new Point(x, y + 2), new Point(x + 4, y - 2) });
-            }
-
-            bounds.Width -= arrowWidth;
-            if (SelectedItem != null) DrawText(graphics, GetItemText(SelectedItem), bounds);
-        }
-
-        private void DrawText(Graphics graphics, string value, Rectangle bounds)
-        {
-            bounds.Inflate(-7, 0);
-            TextRenderer.DrawText(graphics, value, Font, bounds, ForeColor,
-                TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis |
-                DeskStyle.PreserveTextBounds);
-        }
-    }
-
-    internal sealed class DeskCheckBox : CheckBox
-    {
-        private const TextFormatFlags TextFlags = TextFormatFlags.SingleLine | TextFormatFlags.NoPadding |
-            TextFormatFlags.NoPrefix | TextFormatFlags.VerticalCenter;
-        private int BoxSize { get { return Math.Max(14, Font.Height - 3); } }
-
-        public override Size GetPreferredSize(Size proposedSize)
-        {
-            Size text = TextRenderer.MeasureText(Text, Font, Size.Empty, TextFlags);
-            return new Size(BoxSize + 8 + text.Width, Math.Max(Font.Height + 6, BoxSize + 4));
-        }
-
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            Graphics graphics = e.Graphics;
-            int size = BoxSize;
-            var square = new Rectangle(1, (Height - size) / 2, size, size);
-            graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using (GraphicsPath shape = DeskStyle.Rounded(square, 3))
-            using (var fill = new SolidBrush(Checked ? DeskStyle.Accent : DeskStyle.Input))
-            using (var border = new Pen(Checked ? DeskStyle.Accent : DeskStyle.Muted))
-            {
-                graphics.FillPath(fill, shape);
-                graphics.DrawPath(border, shape);
-            }
-            if (Checked)
-            {
-                using (var tick = new Pen(DeskStyle.Background, 1.8f))
-                {
-                    int middle = square.Top + size / 2;
-                    graphics.DrawLines(tick, new[] { new Point(4, middle), new Point(7, middle + 3),
-                        new Point(size - 2, middle - 3) });
-                }
-            }
-
-            var textBounds = new Rectangle(size + 6, 0, Math.Max(0, Width - size - 6), Height);
-            TextRenderer.DrawText(graphics, Text, Font, textBounds, ForeColor, TextFlags | TextFormatFlags.EndEllipsis | DeskStyle.PreserveTextBounds);
-            if (Focused && ShowFocusCues)
-                ControlPaint.DrawFocusRectangle(graphics, ClientRectangle, DeskStyle.Accent, DeskStyle.Surface);
-        }
-
-        protected override void OnCheckedChanged(EventArgs e)
-        {
-            base.OnCheckedChanged(e);
-            Invalidate();
         }
     }
 

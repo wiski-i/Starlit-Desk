@@ -67,6 +67,7 @@ namespace SnowDesk
             body.Controls.Add(hero);
             var heroGrid = DeskStyle.Flow(3);
             heroGrid.AutoSize = false;
+            heroGrid.BackColor = Color.Transparent;
             heroGrid.Dock = DockStyle.Fill;
             heroGrid.ColumnStyles[0] = new ColumnStyle(SizeType.Percent, 35);
             heroGrid.ColumnStyles[1] = new ColumnStyle(SizeType.Percent, 65);
@@ -242,10 +243,11 @@ namespace SnowDesk
 
         private void AddCheck(TableLayoutPanel panel, string title, Func<bool> read, Action<bool> change, bool save = true)
         {
-            var check = new DeskCheckBox
+            var check = new CheckBox
             {
                 Text = title, AutoSize = true, ForeColor = DeskStyle.Text,
-                BackColor = Color.Transparent, Anchor = AnchorStyles.Left,
+                BackColor = DeskStyle.Surface, FlatStyle = FlatStyle.Flat, UseCompatibleTextRendering = true,
+                UseVisualStyleBackColor = false, Anchor = AnchorStyles.Left,
                 Margin = new Padding(0, 1, 0, 2)
             };
             check.CheckedChanged += delegate
