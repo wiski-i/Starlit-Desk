@@ -8,16 +8,18 @@ namespace SnowDesk
 {
     internal static class DeskStyle
     {
-        internal static readonly Color Background = Color.FromArgb(20, 12, 19);
-        internal static readonly Color Surface = Color.FromArgb(32, 18, 29);
-        internal static readonly Color Input = Color.FromArgb(53, 29, 44);
-        internal static readonly Color Border = Color.FromArgb(91, 53, 72);
-        internal static readonly Color Text = Color.FromArgb(250, 235, 241);
-        internal static readonly Color Muted = Color.FromArgb(216, 176, 195);
-        internal static readonly Color Accent = Color.FromArgb(249, 179, 204);
-        internal static readonly Color Caption = Color.FromArgb(40, 21, 34);
-        internal static readonly Color Hover = Color.FromArgb(69, 37, 55);
+        internal static readonly Color Background = Color.FromArgb(25, 15, 24);
+        internal static readonly Color Surface = Color.FromArgb(37, 23, 35);
+        internal static readonly Color Input = Color.FromArgb(60, 37, 53);
+        internal static readonly Color Border = Color.FromArgb(86, 51, 70);
+        internal static readonly Color Text = Color.FromArgb(252, 238, 244);
+        internal static readonly Color Muted = Color.FromArgb(221, 188, 204);
+        internal static readonly Color Accent = Color.FromArgb(244, 181, 204);
+        internal static readonly Color Caption = Color.FromArgb(43, 24, 38);
+        internal static readonly Color Hover = Color.FromArgb(78, 48, 67);
         internal static readonly Bitmap Chevron = CreateChevron();
+        internal static readonly Bitmap MenuTick = CreateMenuTick();
+        private static readonly Font ActionFont = new Font("Segoe UI Semibold", 10f);
         private static readonly Bitmap SwitchOff = CreateSwitch(false);
         private static readonly Bitmap SwitchOn = CreateSwitch(true);
 
@@ -55,7 +57,7 @@ namespace SnowDesk
 
         internal static Button Button(string text, bool primary)
         {
-            var button = new Button { Text = text, Width = 118, Height = 34 };
+            var button = new Button { Text = text, Width = 122, Height = 36, Font = ActionFont };
             StyleButton(button, primary);
             return button;
         }
@@ -68,12 +70,11 @@ namespace SnowDesk
             button.FlatStyle = FlatStyle.Flat;
             button.BackColor = primary ? Accent : Input;
             button.ForeColor = primary ? Background : Text;
-            button.FlatAppearance.BorderSize = primary ? 0 : 1;
-            button.FlatAppearance.BorderColor = Border;
-            button.FlatAppearance.MouseOverBackColor = primary ? Color.FromArgb(255, 205, 224) : Hover;
-            button.FlatAppearance.MouseDownBackColor = primary ? Color.FromArgb(235, 149, 183) : Border;
-            button.Resize += (sender, e) => RoundButton(button);
-            RoundButton(button);
+            button.FlatAppearance.BorderSize = 0;
+            button.FlatAppearance.MouseOverBackColor = primary ? Color.FromArgb(251, 201, 220) : Hover;
+            button.FlatAppearance.MouseDownBackColor = primary ? Color.FromArgb(229, 155, 186) : Color.FromArgb(92, 54, 75);
+            button.Resize += (sender, e) => RoundControl(button, 10);
+            RoundControl(button, 10);
         }
 
         internal static CheckBox Toggle(string title)
@@ -124,12 +125,24 @@ namespace SnowDesk
             return glyph;
         }
 
-        private static void RoundButton(Button button)
+        private static Bitmap CreateMenuTick()
         {
-            int radius = Math.Min(8, Math.Min(button.Width, button.Height) / 2);
+            var glyph = new Bitmap(12, 12);
+            using (Graphics graphics = Graphics.FromImage(glyph))
+            using (var pen = new Pen(Accent, 1.6f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+            {
+                graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                graphics.DrawLines(pen, new[] { new Point(2, 6), new Point(5, 9), new Point(10, 3) });
+            }
+            return glyph;
+        }
+
+        internal static void RoundControl(Control control, int corner)
+        {
+            int radius = Math.Min(corner, Math.Min(control.Width, control.Height) / 2);
             if (radius == 0) return;
-            using (GraphicsPath shape = Rounded(button.ClientRectangle, radius))
-                button.Region = new Region(shape);
+            using (GraphicsPath shape = Rounded(control.ClientRectangle, radius))
+                control.Region = new Region(shape);
         }
 
         internal static GraphicsPath Rounded(Rectangle bounds, int radius)
@@ -170,8 +183,8 @@ namespace SnowDesk
             AccessibleName = label;
             AccessibleRole = AccessibleRole.ComboBox;
             Dock = DockStyle.Top;
-            Height = 32;
-            Padding = new Padding(9, 0, 9, 0);
+            Height = 35;
+            Padding = new Padding(11, 0, 10, 0);
             UseMnemonic = false;
             AutoEllipsis = true;
             Image = DeskStyle.Chevron;
@@ -180,7 +193,8 @@ namespace SnowDesk
             TextImageRelation = TextImageRelation.TextBeforeImage;
             menu.ShowImageMargin = false;
             menu.ShowCheckMargin = true;
-            menu.Renderer = new ToolStripProfessionalRenderer(new DeskMenuColors());
+            menu.Renderer = new DeskMenuRenderer();
+            menu.SizeChanged += (sender, e) => DeskStyle.RoundControl(menu, 10);
         }
 
         internal int SelectedIndex
@@ -206,30 +220,42 @@ namespace SnowDesk
         {
             base.OnClick(e);
             if (Items.Count == 0 || menu.Visible) return;
-            while (menu.Items.Count != 0)
-            {
-                ToolStripItem previous = menu.Items[0];
-                menu.Items.RemoveAt(0);
-                previous.Dispose();
-            }
             menu.Font = Font;
             menu.MinimumSize = new Size(Width, 0);
-            for (int index = 0; index < Items.Count; index++)
+            if (menu.Items.Count != Items.Count)
             {
-                int optionIndex = index;
-                var item = new ToolStripMenuItem(Items[index].ToString())
+                menu.SuspendLayout();
+                while (menu.Items.Count != 0)
                 {
-                    Checked = index == SelectedIndex, ForeColor = DeskStyle.Text,
-                    AutoSize = false, Size = new Size(Math.Max(120, Width - 4), Math.Max(27, Font.Height + 9))
-                };
-                item.Click += (sender, args) => SelectedIndex = optionIndex;
-                menu.Items.Add(item);
+                    ToolStripItem previous = menu.Items[0];
+                    menu.Items.RemoveAt(0);
+                    previous.Dispose();
+                }
+                for (int index = 0; index < Items.Count; index++)
+                {
+                    int optionIndex = index;
+                    var item = new ToolStripMenuItem(Items[index].ToString())
+                    {
+                        ForeColor = DeskStyle.Text, AutoSize = false
+                    };
+                    item.Click += (sender, args) => SelectedIndex = optionIndex;
+                    menu.Items.Add(item);
+                }
+                menu.ResumeLayout();
+            }
+            for (int index = 0; index < menu.Items.Count; index++)
+            {
+                var item = (ToolStripMenuItem)menu.Items[index];
+                item.Text = Items[index].ToString();
+                item.Checked = index == SelectedIndex;
+                item.Size = new Size(Math.Max(120, Width - 4), Math.Max(30, Font.Height + 10));
             }
 
             Form owner = FindForm();
-            bool below = owner == null || PointToScreen(new Point(0, Height)).Y +
+            const int Gap = 4;
+            bool below = owner == null || PointToScreen(new Point(0, Height + Gap)).Y +
                 menu.GetPreferredSize(Size.Empty).Height <= owner.RectangleToScreen(owner.ClientRectangle).Bottom;
-            menu.Show(this, new Point(0, below ? Height : 0),
+            menu.Show(this, new Point(0, below ? Height + Gap : -Gap),
                 below ? ToolStripDropDownDirection.BelowRight : ToolStripDropDownDirection.AboveRight);
             if (SelectedIndex >= 0) menu.Items[SelectedIndex].Select();
         }
@@ -260,17 +286,35 @@ namespace SnowDesk
     {
         public override Color ToolStripDropDownBackground { get { return DeskStyle.Surface; } }
         public override Color MenuBorder { get { return DeskStyle.Border; } }
-        public override Color MenuItemBorder { get { return DeskStyle.Border; } }
-        public override Color MenuItemSelected { get { return DeskStyle.Hover; } }
-        public override Color MenuItemSelectedGradientBegin { get { return DeskStyle.Hover; } }
-        public override Color MenuItemSelectedGradientEnd { get { return DeskStyle.Hover; } }
         public override Color ImageMarginGradientBegin { get { return DeskStyle.Surface; } }
         public override Color ImageMarginGradientMiddle { get { return DeskStyle.Surface; } }
         public override Color ImageMarginGradientEnd { get { return DeskStyle.Surface; } }
-        public override Color ButtonSelectedBorder { get { return DeskStyle.Accent; } }
-        public override Color ButtonPressedBorder { get { return DeskStyle.Border; } }
-        public override Color CheckBackground { get { return DeskStyle.Accent; } }
-        public override Color CheckSelectedBackground { get { return DeskStyle.Accent; } }
+    }
+
+    internal sealed class DeskMenuRenderer : ToolStripProfessionalRenderer
+    {
+        internal DeskMenuRenderer() : base(new DeskMenuColors())
+        {
+            RoundedEdges = false;
+        }
+
+        protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
+        {
+            if (!e.Item.Selected || e.Item.Width < 20 || e.Item.Height < 14) return;
+            var inset = new Rectangle(4, 1, e.Item.Width - 8, e.Item.Height - 2);
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (GraphicsPath shape = DeskStyle.Rounded(inset, 7))
+            using (var fill = new SolidBrush(DeskStyle.Hover))
+                e.Graphics.FillPath(fill, shape);
+        }
+
+        protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)
+        {
+            Rectangle slot = e.ImageRectangle;
+            Bitmap mark = DeskStyle.MenuTick;
+            e.Graphics.DrawImageUnscaled(mark, slot.Left + (slot.Width - mark.Width) / 2,
+                slot.Top + (slot.Height - mark.Height) / 2);
+        }
     }
 
     internal sealed class DeskCard : Panel
@@ -281,7 +325,7 @@ namespace SnowDesk
         {
             this.hero = hero;
             BackColor = DeskStyle.Background;
-            Padding = new Padding(17, 13, 17, 13);
+            Padding = new Padding(19, 15, 19, 15);
             Margin = new Padding(0, 0, 0, 12);
             DoubleBuffered = true;
             ResizeRedraw = true;
@@ -294,13 +338,13 @@ namespace SnowDesk
             Graphics graphics = e.Graphics;
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
             var bounds = new Rectangle(1, 1, Width - 3, Height - 3);
-            using (GraphicsPath outline = DeskStyle.Rounded(bounds, hero ? 20 : 17))
+            using (GraphicsPath outline = DeskStyle.Rounded(bounds, hero ? 22 : 19))
             using (var border = new Pen(DeskStyle.Border))
             {
                 if (hero)
                 {
                     using (var fill = new LinearGradientBrush(bounds, DeskStyle.Surface,
-                        Color.FromArgb(77, 36, 58), 14f))
+                        Color.FromArgb(74, 43, 64), 14f))
                         graphics.FillPath(fill, outline);
                 }
                 else
@@ -324,9 +368,10 @@ namespace SnowDesk
 
         internal DeskThemePreview()
         {
-            SetStyle(ControlStyles.SupportsTransparentBackColor | ControlStyles.OptimizedDoubleBuffer |
-                ControlStyles.ResizeRedraw, true);
-            BackColor = Color.Transparent;
+            SetStyle(ControlStyles.Opaque | ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            BackColor = DeskStyle.Surface;
+            Resize += (sender, e) => DeskStyle.RoundControl(this, 13);
             Dock = DockStyle.Fill;
             Margin = new Padding(4, 0, 10, 0);
             TabStop = false;
@@ -378,19 +423,13 @@ namespace SnowDesk
             if (Width < 24 || Height < 24) return;
             Graphics graphics = e.Graphics;
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            if (preview == null)
+            if (preview != null)
             {
-                DrawConstellation(graphics, ClientRectangle);
+                preview.Draw(graphics, ClientRectangle);
                 return;
             }
-            var bounds = new Rectangle(0, 0, Width - 1, Height - 1);
-            using (GraphicsPath shape = DeskStyle.Rounded(bounds, 12))
-            {
-                GraphicsState previous = graphics.Save();
-                graphics.SetClip(shape, CombineMode.Intersect);
-                preview.Draw(graphics, bounds);
-                graphics.Restore(previous);
-            }
+            using (var fill = new SolidBrush(BackColor)) graphics.FillRectangle(fill, ClientRectangle);
+            DrawConstellation(graphics, ClientRectangle);
         }
 
         protected override void Dispose(bool disposing)

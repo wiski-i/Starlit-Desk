@@ -34,8 +34,8 @@ namespace SnowDesk
             Font = new Font("Segoe UI", 10f);
             BackColor = DeskStyle.Background;
             ForeColor = DeskStyle.Text;
-            ClientSize = new Size(884, 686);
-            MinimumSize = new Size(758, 465);
+            ClientSize = new Size(884, 708);
+            MinimumSize = new Size(770, 465);
             FormClosing += KeepInTray;
 
             var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
@@ -63,7 +63,7 @@ namespace SnowDesk
             header.Controls.Add(brand, 1, 0);
             body.Controls.Add(header);
 
-            var hero = new DeskCard(true) { Dock = DockStyle.Top, Height = 137 };
+            var hero = new DeskCard(true) { Dock = DockStyle.Top, Height = 142 };
             body.Controls.Add(hero);
             var heroGrid = DeskStyle.Flow(3);
             heroGrid.AutoSize = false;
@@ -84,7 +84,7 @@ namespace SnowDesk
             themePreview = new DeskThemePreview();
             heroGrid.Controls.Add(themePreview, 1, 0);
             pause = DeskStyle.Button("", true);
-            pause.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
+            pause.Anchor = AnchorStyles.Right;
             pause.Click += (sender, e) => app.ToggleScene();
             heroGrid.Controls.Add(pause, 2, 0);
 
@@ -93,7 +93,7 @@ namespace SnowDesk
             settingsRow.ColumnStyles[1] = new ColumnStyle(SizeType.Percent, 58);
             body.Controls.Add(settingsRow);
 
-            var general = DeskStyle.Card("Tema ve performans", 280);
+            var general = DeskStyle.Card("Tema ve performans", 291);
             general.Margin = new Padding(0, 0, 12, 12);
             settingsRow.Controls.Add(general, 0, 0);
             var options = (TableLayoutPanel)general.Controls[0];
@@ -120,7 +120,7 @@ namespace SnowDesk
             };
             AddCheck(options, "Windows ile başlat", Program.HasStartup, value => app.ToggleStartup(), false);
 
-            var winter = DeskStyle.Card("Kar ve süslemeler", 280);
+            var winter = DeskStyle.Card("Kar ve süslemeler", 291);
             winterCard = winter;
             settingsRow.Controls.Add(winter, 1, 0);
             var winterBody = (TableLayoutPanel)winter.Controls[0];

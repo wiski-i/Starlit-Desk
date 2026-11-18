@@ -37,13 +37,16 @@ namespace SnowDesk
 
         private readonly SnowField snow = new SnowField(Viewport);
         private readonly Bitmap backdrop = CreateBackdrop();
-        private readonly Bitmap layer = new Bitmap(Viewport.Width, Viewport.Height, PixelFormat.Format32bppPArgb);
+        private readonly Bitmap frame = new Bitmap(Viewport.Width, Viewport.Height, PixelFormat.Format32bppPArgb);
         private readonly Canvas canvas;
         private bool ledgesEnabled;
 
         internal WinterPreview()
         {
-            canvas = new Canvas(layer);
+            canvas = new Canvas(frame);
+            canvas.BeginFrame(Viewport.Width, Viewport.Height);
+            canvas.DrawSnowLayer(backdrop, 0, 0);
+            canvas.Flush();
         }
 
         internal override void Advance(double seconds, Settings settings)
@@ -54,15 +57,15 @@ namespace SnowDesk
                 snow.UpdateLedges(ledgesEnabled ? WindowEdges : NoWindows);
             }
             snow.Advance(seconds, settings, default(Desktop.Point));
-            canvas.BeginFrame(Viewport.Width, Viewport.Height);
+            // The opaque backdrop replaces the previous frame in the same buffer.
+            canvas.DrawSnowLayer(backdrop, 0, 0);
             snow.Draw(canvas);
             canvas.Flush();
         }
 
         internal override void Draw(Graphics graphics, Rectangle destination)
         {
-            graphics.DrawImage(backdrop, destination);
-            graphics.DrawImage(layer, destination);
+            graphics.DrawImage(frame, destination);
         }
 
         private static Desktop.WindowBounds WindowEdge(int id, Rectangle bounds)
@@ -119,7 +122,7 @@ namespace SnowDesk
         public override void Dispose()
         {
             canvas.Dispose();
-            layer.Dispose();
+            frame.Dispose();
             backdrop.Dispose();
             snow.Dispose();
         }
