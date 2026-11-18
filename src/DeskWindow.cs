@@ -280,9 +280,8 @@ namespace SnowDesk
             const int CaptionColor = 35;
             const int TextColor = 36;
             if (SystemInformation.HighContrast) return;
-            int dark = 1;
-            if (DwmSetWindowAttribute(Handle, ImmersiveDarkMode, ref dark, sizeof(int)) != 0)
-                DwmSetWindowAttribute(Handle, 19, ref dark, sizeof(int));
+            if (DeskStyle.SetFrameAttribute(Handle, ImmersiveDarkMode, 1) != 0)
+                DeskStyle.SetFrameAttribute(Handle, 19, 1);
             SetCaptionColor(BorderColor, DeskStyle.Border);
             SetCaptionColor(CaptionColor, DeskStyle.Caption);
             SetCaptionColor(TextColor, DeskStyle.Text);
@@ -290,8 +289,7 @@ namespace SnowDesk
 
         private void SetCaptionColor(int attribute, Color color)
         {
-            int value = ColorTranslator.ToWin32(color);
-            DwmSetWindowAttribute(Handle, attribute, ref value, sizeof(int));
+            DeskStyle.SetFrameAttribute(Handle, attribute, ColorTranslator.ToWin32(color));
         }
 
         protected override void Dispose(bool disposing)
@@ -300,7 +298,5 @@ namespace SnowDesk
             base.Dispose(disposing);
         }
 
-        [DllImport("dwmapi.dll")]
-        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
     }
 }

@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace SnowDesk
@@ -68,13 +70,12 @@ namespace SnowDesk
             button.UseVisualStyleBackColor = false;
             button.UseCompatibleTextRendering = true;
             button.FlatStyle = FlatStyle.Flat;
-            button.BackColor = primary ? Accent : Input;
+            button.BackColor = primary ? Color.Transparent : Surface;
             button.ForeColor = primary ? Background : Text;
             button.FlatAppearance.BorderSize = 0;
-            button.FlatAppearance.MouseOverBackColor = primary ? Color.FromArgb(251, 201, 220) : Hover;
-            button.FlatAppearance.MouseDownBackColor = primary ? Color.FromArgb(229, 155, 186) : Color.FromArgb(92, 54, 75);
-            button.Resize += (sender, e) => RoundControl(button, 10);
-            RoundControl(button, 10);
+            button.FlatAppearance.MouseOverBackColor = button.BackColor;
+            button.FlatAppearance.MouseDownBackColor = button.BackColor;
+            new DeskButtonSurface(button, primary);
         }
 
         internal static CheckBox Toggle(string title)
@@ -137,6 +138,14 @@ namespace SnowDesk
             return glyph;
         }
 
+        internal static int SetFrameAttribute(IntPtr window, int attribute, int value)
+        {
+            return DwmSetWindowAttribute(window, attribute, ref value, sizeof(int));
+        }
+
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+
         internal static void RoundControl(Control control, int corner)
         {
             int radius = Math.Min(corner, Math.Min(control.Width, control.Height) / 2);
@@ -170,6 +179,104 @@ namespace SnowDesk
         }
     }
 
+    internal sealed class DeskButtonSurface
+    {
+        private static readonly Color[] PrimaryTop =
+        {
+            Color.FromArgb(255, 211, 224), Color.FromArgb(255, 225, 234), Color.FromArgb(240, 171, 197)
+        };
+        private static readonly Color[] PrimaryBottom =
+        {
+            Color.FromArgb(231, 160, 185), Color.FromArgb(249, 190, 211), Color.FromArgb(217, 141, 170)
+        };
+        private static readonly Color[] SecondaryFill =
+        {
+            Color.FromArgb(51, 30, 44), Color.FromArgb(68, 38, 55), Color.FromArgb(76, 40, 61)
+        };
+
+        private readonly Button button;
+        private readonly bool primary;
+        private readonly Bitmap[] surfaces = new Bitmap[3];
+        private bool hovered;
+        private bool pressed;
+
+        internal DeskButtonSurface(Button button, bool primary)
+        {
+            this.button = button;
+            this.primary = primary;
+            button.BackgroundImageLayout = ImageLayout.None;
+            button.Resize += (sender, e) => Rebuild();
+            button.DpiChangedAfterParent += (sender, e) => Rebuild();
+            button.MouseEnter += (sender, e) => { hovered = true; Apply(); };
+            button.MouseLeave += (sender, e) => { hovered = false; Apply(); };
+            button.MouseDown += (sender, e) =>
+            {
+                if (e.Button == MouseButtons.Left) { pressed = true; Apply(); }
+            };
+            button.MouseUp += (sender, e) => Release();
+            button.MouseCaptureChanged += (sender, e) => { if (!button.Capture) Release(); };
+            button.KeyDown += (sender, e) => { if (e.KeyCode == Keys.Space) { pressed = true; Apply(); } };
+            button.KeyUp += (sender, e) => { if (e.KeyCode == Keys.Space) Release(); };
+            button.LostFocus += (sender, e) => Release();
+            button.Disposed += (sender, e) => DisposeSurfaces();
+            Apply();
+        }
+
+        private void Release()
+        {
+            if (!pressed) return;
+            pressed = false;
+            Apply();
+        }
+
+        private void Rebuild()
+        {
+            button.BackgroundImage = null;
+            DisposeSurfaces();
+            Apply();
+        }
+
+        private void Apply()
+        {
+            if (button.Width < 4 || button.Height < 4 || button.IsDisposed) return;
+            int state = pressed ? 2 : hovered ? 1 : 0;
+            if (surfaces[state] == null) surfaces[state] = DrawSurface(state);
+            button.BackgroundImage = surfaces[state];
+        }
+
+        private Bitmap DrawSurface(int state)
+        {
+            var bitmap = new Bitmap(button.Width, button.Height, PixelFormat.Format32bppPArgb);
+            var bounds = new Rectangle(1, 1, bitmap.Width - 2, bitmap.Height - 2);
+            int radius = Math.Max(1, Math.Min(10 * button.DeviceDpi / 96,
+                Math.Min(bounds.Width, bounds.Height) / 2));
+            Color top = primary ? PrimaryTop[state] : SecondaryFill[state];
+            Color bottom = primary ? PrimaryBottom[state] : top;
+            Color stroke = primary ? Color.FromArgb(233, 167, 189) :
+                (state == 0 ? Color.FromArgb(79, 47, 65) : Color.FromArgb(120, 64, 87));
+
+            using (Graphics graphics = Graphics.FromImage(bitmap))
+            using (GraphicsPath outline = DeskStyle.Rounded(bounds, radius))
+            using (var fill = new LinearGradientBrush(bounds, top, bottom, 135f))
+            using (var edge = new Pen(stroke))
+            {
+                graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                graphics.FillPath(fill, outline);
+                graphics.DrawPath(edge, outline);
+            }
+            return bitmap;
+        }
+
+        private void DisposeSurfaces()
+        {
+            for (int i = 0; i < surfaces.Length; i++)
+            {
+                if (surfaces[i] != null) surfaces[i].Dispose();
+                surfaces[i] = null;
+            }
+        }
+    }
+
     internal sealed class DeskSelect : Button
     {
         private readonly ContextMenuStrip menu = new ContextMenuStrip();
@@ -194,7 +301,12 @@ namespace SnowDesk
             menu.ShowImageMargin = false;
             menu.ShowCheckMargin = true;
             menu.Renderer = new DeskMenuRenderer();
-            menu.SizeChanged += (sender, e) => DeskStyle.RoundControl(menu, 10);
+            menu.HandleCreated += (sender, e) =>
+            {
+                const int CornerPreference = 33;
+                const int RoundSmall = 3;
+                DeskStyle.SetFrameAttribute(menu.Handle, CornerPreference, RoundSmall);
+            };
         }
 
         internal int SelectedIndex
@@ -285,7 +397,7 @@ namespace SnowDesk
     internal sealed class DeskMenuColors : ProfessionalColorTable
     {
         public override Color ToolStripDropDownBackground { get { return DeskStyle.Surface; } }
-        public override Color MenuBorder { get { return DeskStyle.Border; } }
+        public override Color MenuBorder { get { return DeskStyle.Surface; } }
         public override Color ImageMarginGradientBegin { get { return DeskStyle.Surface; } }
         public override Color ImageMarginGradientMiddle { get { return DeskStyle.Surface; } }
         public override Color ImageMarginGradientEnd { get { return DeskStyle.Surface; } }
