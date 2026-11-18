@@ -20,6 +20,7 @@ namespace SnowDesk
         private readonly Control winterCard, actionCard;
         private readonly Image logo;
         private bool syncing;
+        private bool foreground;
 
         internal DeskWindow(Program app, Icon icon)
         {
@@ -186,8 +187,22 @@ namespace SnowDesk
         private void UpdatePreview()
         {
             if (hero != null)
-                hero.SetPreview(settings.Theme.PreviewResource,
-                    Visible && app.IsRunning && WindowState != FormWindowState.Minimized);
+                hero.SetPreview(settings,
+                    foreground && Visible && app.IsRunning && WindowState != FormWindowState.Minimized);
+        }
+
+        protected override void OnActivated(EventArgs e)
+        {
+            base.OnActivated(e);
+            foreground = true;
+            UpdatePreview();
+        }
+
+        protected override void OnDeactivate(EventArgs e)
+        {
+            foreground = false;
+            UpdatePreview();
+            base.OnDeactivate(e);
         }
 
         protected override void OnVisibleChanged(EventArgs e)

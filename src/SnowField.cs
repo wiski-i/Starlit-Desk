@@ -34,6 +34,7 @@ namespace SnowDesk
         private readonly Rect screen;
         private readonly Rect workArea;
         private readonly Decorations effects;
+        private readonly bool animateDecorations;
         private readonly Icicles icicles;
         private readonly SnowLedge floor;
         private int flakeCount;
@@ -69,11 +70,14 @@ namespace SnowDesk
             }
         }
 
-        internal SnowField(Forms.Screen display)
+        internal SnowField(Forms.Screen display) : this(display.Bounds, display.WorkingArea, true) { }
+
+        internal SnowField(System.Drawing.Rectangle viewport) : this(viewport, viewport, false) { }
+
+        private SnowField(System.Drawing.Rectangle bounds, System.Drawing.Rectangle work, bool animateDecorations)
         {
-            var bounds = display.Bounds;
+            this.animateDecorations = animateDecorations;
             screen = new Rect(bounds.X, bounds.Y, bounds.Width, bounds.Height);
-            var work = display.WorkingArea;
             workArea = new Rect(work.X, work.Y, work.Width, work.Height);
             effects = new Decorations(bounds.Width, bounds.Height, SpillPlow, KickPowder, SprayPlow);
             icicles = new Icicles(screen, workArea);
@@ -316,7 +320,7 @@ namespace SnowDesk
                 }
                 snowMaintenance = windTravel = 0;
             }
-            effects.Advance(seconds, elapsed, settings, ledges);
+            if (animateDecorations) effects.Advance(seconds, elapsed, settings, ledges);
             icicles.Advance(seconds, settings.Icicles, ledges);
         }
 

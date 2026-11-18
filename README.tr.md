@@ -20,7 +20,7 @@ Türkçe kontrol paneli AI Usage Hub’ın yıldızsal bordo ve gül pembesi ren
 
 1. Windows 10 veya 11’de .NET Framework 4.8 veya üzeriyle uygulamayı derle. Eski SnowDesk açıksa kapat, ardından `build` klasöründeki **StarlitDesk.exe** dosyasını çalıştır.
 2. Kontrol panelinden masaüstü temasını seç, kar yoğunluğunu ve kare hızını ayarla veya bir efekt başlat. Seçimlerin yerel olarak kaydedilir.
-3. Paneli yeniden açmak için Windows saatinin yanındaki yıldız simgesine tıkla. Simge **^** menüsünde de olabilir. Sağ tıkla hızlı ayarlara, **Duraklat** ve **Çıkış** seçeneklerine ulaş.
+3. Paneli yeniden açmak için Windows saatinin yanındaki Starlit Desk simgesine tıkla. Simge **^** menüsünde de olabilir. Sağ tıkla hızlı ayarlara, **Duraklat** ve **Çıkış** seçeneklerine ulaş.
 4. Oturum açtığında tepside başlaması için **Windows ile başlat** seçeneğini aç. Uygulamayı başka klasöre taşımadan önce bu seçeneği kapat.
 
 ## Özellikler
@@ -51,7 +51,7 @@ Derleme, Windows’taki .NET Framework’ün 64 bit C# derleyicisini kullanır. 
 
 `DesktopScene` arayüzünü uygulayan bir sınıf yaz ve [src/DesktopTheme.cs](src/DesktopTheme.cs) içindeki kataloğa kaydet. Her tema sabit bir kimlik, görünen ad, açıklama ve her ekran için ayrı efekt örneği üreten bir işlev kullanır. Temayı `DesktopTheme.All` listesine eklediğinde seçicide görünür. Kayıtlı teması bulunamayan veya eski ayar dosyası kullanan kurulumlar **Kış** temasıyla açılır.
 
-Animasyonlu önizleme için GIF dosyasını [`branding/previews/`](branding/previews/) klasörüne koy ve tema kaydında `StarlitDesk.Previews.<dosya>.gif` kaynağını belirt. Önizleme seçilen temanın kartında oynar. Efekt duraklatıldığında veya Windows animasyon efektleri kapatıldığında GIF sabit kalır.
+Canlı önizleme eklemek için tema kaydına isteğe bağlı bir `ThemePreview` fabrikası ver. Kış kartı, iki örnek pencerenin üzerinde kar simülasyonunu çalıştırır ve geçerli yoğunluk, rüzgâr ve birikme ayarlarını yansıtır. Önizleme, kontrol paneli öndeyken ve efekt çalışırken hareket eder.
 
 | Yol | İçerik |
 | --- | --- |

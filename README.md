@@ -20,7 +20,7 @@ The Turkish control panel uses the burgundy and rose palette of AI Usage Hub. Th
 
 1. Build the app on Windows 10 or 11 with .NET Framework 4.8 or later, then open **StarlitDesk.exe** in the `build` folder. Close older SnowDesk instances before launching.
 2. Use the control panel to choose a desktop theme, change the density and frame rate, or trigger an effect. Changes are saved locally.
-3. Click the star beside the clock to reopen the panel. Windows may place the star under **^**. Right-click for quick settings, pause or **Çıkış** (Quit).
+3. Click the Starlit Desk icon beside the clock to reopen the panel. Windows may place it under **^**. Right-click for quick settings, pause or **Çıkış** (Quit).
 4. Enable **Windows ile başlat** to start in the tray when you sign in. Turn it off before moving the executable.
 
 ## Features
@@ -51,7 +51,7 @@ The build uses the 64-bit C# compiler included with .NET Framework on Windows. T
 
 Create a `DesktopScene` implementation and give it a catalog entry in [src/DesktopTheme.cs](src/DesktopTheme.cs). Each entry uses a stable ID, a display name, a description and a factory that creates one scene per monitor. Include the entry in `DesktopTheme.All` to show it in the selector. Keep the ID stable to preserve saved selections. Missing or older theme selections resolve to Winter.
 
-To add an animated preview, place a GIF in [`branding/previews/`](branding/previews/) and set the entry’s preview resource to `StarlitDesk.Previews.<file>.gif`. The preview plays in the selected theme card. Pausing the effect or turning off Windows animation effects pauses the GIF.
+To add a live preview, supply an optional `ThemePreview` factory in the catalog entry. The Winter preview runs the snowfall simulation over two miniature windows and reflects the current density, wind and accumulation settings. The card animates while the control panel is in the foreground and the effect is running.
 
 | Path | Purpose |
 | --- | --- |

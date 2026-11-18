@@ -31,8 +31,6 @@ $arguments = @(
     "/out:$output\$OutputName"
 )
 $arguments += $references | ForEach-Object { '/reference:' + (Join-Path $framework $_) }
-$arguments += Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'branding/previews') -Filter '*.gif' -File |
-    ForEach-Object { '/resource:{0},StarlitDesk.Previews.{1}' -f $_.FullName, $_.Name }
 $arguments += Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'src') -Filter '*.cs' |
     ForEach-Object FullName
 & $compiler @arguments

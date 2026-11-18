@@ -1,60 +1,17 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
-using System.IO;
 using System.Runtime.InteropServices;
 
 namespace SnowDesk
 {
-    internal sealed class ThemePreview : IDisposable
+    internal abstract class ThemePreview : IDisposable
     {
-        private const int FrameDelayTag = 0x5100;
-        private readonly Stream source;
-        private readonly int frameCount;
-        private readonly byte[] delays;
-        private int frame;
-        internal readonly Image Image;
-
-        private ThemePreview(Stream source)
-        {
-            this.source = source;
-            Image = Image.FromStream(source);
-            frameCount = Image.GetFrameCount(FrameDimension.Time);
-            if (Array.IndexOf(Image.PropertyIdList, FrameDelayTag) >= 0)
-                delays = Image.GetPropertyItem(FrameDelayTag).Value;
-        }
-
-        internal static ThemePreview Load(string resource)
-        {
-            if (resource == null) return null;
-            Stream source = typeof(ThemePreview).Assembly.GetManifestResourceStream(resource);
-            if (source == null) return null;
-            try { return new ThemePreview(source); }
-            catch
-            {
-                source.Dispose();
-                throw;
-            }
-        }
-
-        internal bool IsAnimated { get { return frameCount > 1; } }
-
-        internal int Delay
-        {
-            get
-            {
-                int offset = frame * sizeof(int);
-                if (delays == null || delays.Length < offset + sizeof(int)) return 100;
-                int duration = BitConverter.ToInt32(delays, offset);
-                return Math.Max(20, Math.Min(6000, duration) * 10);
-            }
-        }
-
-        internal void Advance()
-        {
-            frame = (frame + 1) % frameCount;
-            Image.SelectActiveFrame(FrameDimension.Time, frame);
-        }
+        internal abstract void Advance(double seconds, Settings settings);
+        internal abstract void Draw(Graphics graphics, Rectangle destination);
+        public abstract void Dispose();
 
         internal static bool WindowsAllowsAnimation()
         {
@@ -63,13 +20,108 @@ namespace SnowDesk
             return SystemParametersInfo(GetClientAreaAnimation, 0, out enabled, 0) && enabled != 0;
         }
 
-        public void Dispose()
-        {
-            Image.Dispose();
-            source.Dispose();
-        }
-
         [DllImport("user32.dll")]
         private static extern bool SystemParametersInfo(uint action, uint parameter, out int value, uint flags);
+    }
+
+    internal sealed class WinterPreview : ThemePreview
+    {
+        private static readonly Rectangle Viewport = new Rectangle(0, 0, 640, 220);
+        private static readonly Rectangle FrontWindow = new Rectangle(230, 82, 257, 112);
+        private static readonly Rectangle BackWindow = new Rectangle(353, 41, 221, 99);
+        private static readonly List<Desktop.WindowBounds> WindowEdges = new List<Desktop.WindowBounds>
+        {
+            WindowEdge(1, FrontWindow), WindowEdge(2, BackWindow)
+        };
+        private static readonly List<Desktop.WindowBounds> NoWindows = new List<Desktop.WindowBounds>();
+
+        private readonly SnowField snow = new SnowField(Viewport);
+        private readonly Bitmap backdrop = CreateBackdrop();
+        private readonly Bitmap layer = new Bitmap(Viewport.Width, Viewport.Height, PixelFormat.Format32bppPArgb);
+        private readonly Canvas canvas;
+        private bool ledgesEnabled;
+
+        internal WinterPreview()
+        {
+            canvas = new Canvas(layer);
+        }
+
+        internal override void Advance(double seconds, Settings settings)
+        {
+            if (ledgesEnabled != settings.WindowLedges)
+            {
+                ledgesEnabled = settings.WindowLedges;
+                snow.UpdateLedges(ledgesEnabled ? WindowEdges : NoWindows);
+            }
+            snow.Advance(seconds, settings, default(Desktop.Point));
+            canvas.BeginFrame(Viewport.Width, Viewport.Height);
+            snow.Draw(canvas);
+            canvas.Flush();
+        }
+
+        internal override void Draw(Graphics graphics, Rectangle destination)
+        {
+            graphics.DrawImage(backdrop, destination);
+            graphics.DrawImage(layer, destination);
+        }
+
+        private static Desktop.WindowBounds WindowEdge(int id, Rectangle bounds)
+        {
+            return new Desktop.WindowBounds
+            {
+                Handle = new IntPtr(id),
+                Bounds = new System.Windows.Rect(bounds.X, bounds.Y, bounds.Width, bounds.Height),
+                CornerRadius = 12
+            };
+        }
+
+        private static Bitmap CreateBackdrop()
+        {
+            var bitmap = new Bitmap(Viewport.Width, Viewport.Height, PixelFormat.Format32bppPArgb);
+            using (Graphics graphics = Graphics.FromImage(bitmap))
+            using (var gradient = new LinearGradientBrush(Viewport,
+                Color.FromArgb(41, 22, 36), Color.FromArgb(70, 42, 68), LinearGradientMode.Horizontal))
+            using (var orbit = new Pen(Color.FromArgb(42, DeskStyle.Accent)))
+            using (var star = new SolidBrush(Color.FromArgb(198, DeskStyle.Accent)))
+            {
+                graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                graphics.FillRectangle(gradient, Viewport);
+                graphics.DrawEllipse(orbit, 156, 27, 464, 174);
+                graphics.DrawEllipse(orbit, 189, 49, 413, 135);
+                DrawWindow(graphics, BackWindow, Color.FromArgb(63, 39, 65));
+                DrawWindow(graphics, FrontWindow, Color.FromArgb(49, 30, 52));
+                graphics.FillPolygon(star, new[]
+                {
+                    new Point(593, 42), new Point(596, 52), new Point(605, 56), new Point(596, 60),
+                    new Point(593, 70), new Point(590, 60), new Point(581, 56), new Point(590, 52)
+                });
+            }
+            return bitmap;
+        }
+
+        private static void DrawWindow(Graphics graphics, Rectangle bounds, Color color)
+        {
+            using (GraphicsPath shape = DeskStyle.Rounded(bounds, 12))
+            using (var body = new SolidBrush(color))
+            using (var rim = new Pen(Color.FromArgb(91, DeskStyle.Muted), 1.5f))
+            using (var content = new SolidBrush(Color.FromArgb(34, DeskStyle.Muted)))
+            {
+                graphics.FillPath(body, shape);
+                graphics.DrawPath(rim, shape);
+                graphics.DrawLine(rim, bounds.Left + 2, bounds.Top + 24, bounds.Right - 2, bounds.Top + 24);
+                for (int i = 0; i < 3; i++) graphics.FillEllipse(content, bounds.Left + 13 + i * 10, bounds.Top + 10, 5, 5);
+                graphics.FillRectangle(content, bounds.Left + 14, bounds.Top + 37, 55, bounds.Height - 51);
+                for (int i = 0; i < 3; i++)
+                    graphics.FillRectangle(content, bounds.Left + 84, bounds.Top + 39 + i * 15, bounds.Width - 108 - i * 18, 3);
+            }
+        }
+
+        public override void Dispose()
+        {
+            canvas.Dispose();
+            layer.Dispose();
+            backdrop.Dispose();
+            snow.Dispose();
+        }
     }
 }

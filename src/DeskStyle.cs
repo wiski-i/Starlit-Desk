@@ -240,13 +240,14 @@ namespace SnowDesk
         private readonly bool hero;
         private readonly Timer previewClock;
         private ThemePreview preview;
-        private string previewResource;
+        private DesktopTheme previewTheme;
+        private Settings previewSettings;
         private bool previewPlaying;
 
         internal DeskCard(bool hero)
         {
             this.hero = hero;
-            if (hero) previewClock = new Timer();
+            if (hero) previewClock = new Timer { Interval = 40 };
             if (previewClock != null) previewClock.Tick += AdvancePreview;
             BackColor = DeskStyle.Background;
             Padding = new Padding(17, 13, 17, 13);
@@ -255,14 +256,16 @@ namespace SnowDesk
             ResizeRedraw = true;
         }
 
-        internal void SetPreview(string resource, bool playing)
+        internal void SetPreview(Settings settings, bool playing)
         {
-            if (resource != previewResource)
+            previewSettings = settings;
+            DesktopTheme theme = settings.Theme;
+            if (theme != previewTheme)
             {
                 previewClock.Stop();
                 if (preview != null) preview.Dispose();
-                preview = ThemePreview.Load(resource);
-                previewResource = resource;
+                preview = theme.CreatePreview == null ? null : theme.CreatePreview();
+                previewTheme = theme;
                 Invalidate(true);
             }
             previewPlaying = playing;
@@ -278,11 +281,8 @@ namespace SnowDesk
         private void UpdatePreviewPlayback()
         {
             if (previewClock == null) return;
-            bool animate = Visible && previewPlaying && preview != null && preview.IsAnimated &&
+            previewClock.Enabled = Visible && previewPlaying && preview != null &&
                 ThemePreview.WindowsAllowsAnimation();
-            if (animate && !previewClock.Enabled)
-                previewClock.Interval = preview.Delay;
-            previewClock.Enabled = animate;
         }
 
         private void AdvancePreview(object sender, EventArgs e)
@@ -292,8 +292,7 @@ namespace SnowDesk
                 previewClock.Stop();
                 return;
             }
-            preview.Advance();
-            previewClock.Interval = preview.Delay;
+            preview.Advance(previewClock.Interval / 1000.0, previewSettings);
             int left = Width * 36 / 100;
             Invalidate(new Rectangle(left, 0, Width - left, Height), true);
         }
@@ -302,7 +301,7 @@ namespace SnowDesk
         {
             int left = bounds.Left + bounds.Width * 36 / 100;
             var imageArea = Rectangle.FromLTRB(left, bounds.Top, bounds.Right, bounds.Bottom);
-            graphics.DrawImage(preview.Image, imageArea);
+            preview.Draw(graphics, imageArea);
             var fadeArea = new Rectangle(left - 1, bounds.Top, imageArea.Width / 4, bounds.Height);
             using (var fade = new LinearGradientBrush(fadeArea, Color.FromArgb(48, 25, 40),
                 Color.FromArgb(0, 48, 25, 40), LinearGradientMode.Horizontal))
