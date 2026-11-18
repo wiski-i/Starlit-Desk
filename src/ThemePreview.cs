@@ -25,7 +25,8 @@ namespace SnowDesk
         private static extern bool SystemParametersInfo(uint action, uint parameter, out int value, uint flags);
     }
 
-    internal sealed class WinterPreview : ThemePreview
+    /// <summary>Runs a theme's own scene on a small painted desktop with two windows for the theme card.</summary>
+    internal sealed class ScenePreview : ThemePreview
     {
         private static readonly Rectangle Viewport = new Rectangle(0, 0, 640, 220);
         private static readonly Rectangle FrontWindow = new Rectangle(230, 82, 257, 112);
@@ -36,14 +37,15 @@ namespace SnowDesk
         };
         private static readonly List<Desktop.WindowBounds> NoWindows = new List<Desktop.WindowBounds>();
 
-        private readonly SnowField snow = new SnowField(Viewport);
+        private readonly DesktopScene snow;
         private readonly Bitmap backdrop = CreateBackdrop();
         private readonly Bitmap frame = new Bitmap(Viewport.Width, Viewport.Height, PixelFormat.Format32bppPArgb);
         private readonly Canvas canvas;
         private bool ledgesEnabled;
 
-        internal WinterPreview()
+        internal ScenePreview(Func<Rectangle, DesktopScene> createScene)
         {
+            snow = createScene(Viewport);
             canvas = new Canvas(frame);
             canvas.BeginFrame(Viewport.Width, Viewport.Height);
             canvas.DrawSnowLayer(backdrop, 0, 0);

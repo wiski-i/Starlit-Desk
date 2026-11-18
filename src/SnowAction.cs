@@ -27,4 +27,29 @@ namespace SnowDesk
 
         public override string ToString() { return Name; }
     }
+
+    /// <summary>One-shot actions of the summer theme, offered in the panel's action card.</summary>
+    internal sealed class SummerAction
+    {
+        internal static readonly SummerAction[] All =
+        {
+            new SummerAction("Sağanak başlat", scene => scene.SetWeather(true)),
+            new SummerAction("Güneşi aç", scene => scene.SetWeather(false)),
+            new SummerAction("Simitli kızı çağır", scene => scene.InviteBather()),
+            new SummerAction("Su pompasını çağır", scene => scene.CallPump()),
+            new SummerAction("Koşan adamı gönder", scene => scene.SendRunner()),
+            new SummerAction("Rüzgâr estir", scene => scene.Gust())
+        };
+
+        internal readonly string Name;
+        internal readonly Action<SummerScene> Apply;
+
+        private SummerAction(string name, Action<SummerScene> apply)
+        {
+            Name = name;
+            Apply = apply;
+        }
+
+        public override string ToString() { return Name; }
+    }
 }

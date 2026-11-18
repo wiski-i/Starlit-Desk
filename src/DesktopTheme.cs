@@ -8,9 +8,13 @@ namespace SnowDesk
     {
         internal static readonly DesktopTheme Winter = new DesktopTheme(
             "winter", "Kış", "Pencerelerin üzerinde biriken kar ve kış süsleri.",
-            display => new SnowField(display), () => new WinterPreview());
+            display => new SnowField(display), () => new ScenePreview(viewport => new SnowField(viewport)));
 
-        internal static readonly IReadOnlyList<DesktopTheme> All = Array.AsReadOnly(new[] { Winter });
+        internal static readonly DesktopTheme Summer = new DesktopTheme(
+            "summer", "Yaz", "Yaz sağanağı, su birikintileri ve yaz süsleri.",
+            display => new SummerScene(display), () => new ScenePreview(viewport => new SummerScene(viewport)));
+
+        internal static readonly IReadOnlyList<DesktopTheme> All = Array.AsReadOnly(new[] { Winter, Summer });
 
         internal readonly string Id;
         internal readonly string Name;

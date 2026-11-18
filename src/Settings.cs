@@ -14,6 +14,19 @@ namespace SnowDesk
         Gondola = 16
     }
 
+    /// <summary>Optional pieces of the summer theme; stored as the "summer" bit mask.</summary>
+    [Flags]
+    internal enum SummerEffect
+    {
+        Bather = 1,
+        Runner = 2,
+        Pump = 4,
+        Pond = 8,
+        Duck = 16,
+        Rainbow = 32,
+        All = 63
+    }
+
     internal sealed class Settings
     {
         private static readonly string DefaultPath = Path.Combine(
@@ -28,6 +41,7 @@ namespace SnowDesk
         internal bool WindowLedges = true;
         internal bool Icicles = true;
         internal Effect Effects = Effect.Trees | Effect.Sleigh | Effect.Santa | Effect.Plow;
+        internal SummerEffect Summer = SummerEffect.All;
 
         private Settings(string filePath)
         {
@@ -37,6 +51,11 @@ namespace SnowDesk
         internal bool Has(Effect effect)
         {
             return (Effects & effect) != 0;
+        }
+
+        internal bool Has(SummerEffect effect)
+        {
+            return (Summer & effect) != 0;
         }
 
         internal static Settings Load(string path = null)
@@ -63,6 +82,7 @@ namespace SnowDesk
                     if (key == "ledges") settings.WindowLedges = value != 0;
                     if (key == "icicles") settings.Icicles = value != 0;
                     if (key == "effects") settings.Effects = (Effect)(value & 31);
+                    if (key == "summer") settings.Summer = (SummerEffect)(value & (int)SummerEffect.All);
                 }
             }
             catch (IOException) { }
@@ -75,9 +95,9 @@ namespace SnowDesk
             Directory.CreateDirectory(Path.GetDirectoryName(filePath));
             string temp = filePath + ".tmp";
             File.WriteAllText(temp, string.Format(CultureInfo.InvariantCulture,
-                "density={0}\nfps={1}\nwind={2}\neffects={3}\nsweep={4}\nledges={5}\nicicles={6}\ntheme={7}\n",
+                "density={0}\nfps={1}\nwind={2}\neffects={3}\nsweep={4}\nledges={5}\nicicles={6}\ntheme={7}\nsummer={8}\n",
                 Density, Rate, Wind ? 1 : 0, (int)Effects, CursorSweep ? 1 : 0, WindowLedges ? 1 : 0,
-                Icicles ? 1 : 0, Theme.Id));
+                Icicles ? 1 : 0, Theme.Id, (int)Summer));
             if (File.Exists(filePath)) File.Replace(temp, filePath, null);
             else File.Move(temp, filePath);
         }

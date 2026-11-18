@@ -400,8 +400,9 @@ namespace SnowDesk
             menu.Opening += delegate
             {
                 bool winter = settings.Theme == DesktopTheme.Winter;
-                density.Available = sweep.Available = ledges.Available = wind.Available =
-                    decorations.Available = manual.Available = winter;
+                sweep.Available = decorations.Available = manual.Available = winter;
+                density.Text = winter ? "Kar yoğunluğu" : "Yağmur yoğunluğu";
+                ledges.Text = winter ? "Pencere ve menülerde kar" : "Pencerelerde su";
                 toggle.Text = running ? "Duraklat" : "Devam et";
                 wind.Checked = settings.Wind;
                 sweep.Checked = settings.CursorSweep;
@@ -420,11 +421,24 @@ namespace SnowDesk
                 return;
             }
 
+            Overlay target = ActionTarget();
+            if (target != null) action.Apply(target.Snow);
+        }
+
+        internal void RunSummerAction(SummerAction action)
+        {
+            if (settings.Theme != DesktopTheme.Summer) return;
+            Overlay target = ActionTarget();
+            if (target != null) action.Apply((SummerScene)target.Scene);
+        }
+
+        /// <summary>Resumes the scene if needed and returns the visible display under the cursor.</summary>
+        private Overlay ActionTarget()
+        {
             if (!running) ToggleScene();
             Desktop.GetCursorPos(out cursor);
-            Overlay target = overlays.Find(item => item.IsVisible && item.Contains(cursor)) ??
+            return overlays.Find(item => item.IsVisible && item.Contains(cursor)) ??
                 overlays.Find(item => item.IsVisible);
-            if (target != null) action.Apply(target.Snow);
         }
 
         internal void SetWindowLedges(bool enabled)

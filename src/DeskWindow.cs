@@ -14,10 +14,11 @@ namespace SnowDesk
         private readonly DeskThemePreview themePreview;
         private readonly Settings settings;
         private readonly List<Action> updateChecks = new List<Action>();
-        private readonly DeskSelect themes, density, rate;
+        private readonly DeskSelect themes, density, rate, rain, effects;
         private readonly Label intro, status, themeDetail;
         private readonly Button pause;
-        private readonly Control winterCard, actionCard;
+        private readonly Control winterCard, summerCard;
+        private DesktopTheme actionTheme;
         private readonly Image logo;
         private bool syncing;
         private bool foreground;
@@ -121,9 +122,14 @@ namespace SnowDesk
             };
             AddCheck(options, "Windows ile başlat", Program.HasStartup, value => app.ToggleStartup(), false);
 
+            // Each theme brings its own settings card into the same column; only the selected one is visible.
+            var themeColumn = DeskStyle.Flow(1);
+            settingsRow.Controls.Add(themeColumn, 1, 0);
             var winter = DeskStyle.Card("Kar ve süslemeler", 291);
             winterCard = winter;
-            settingsRow.Controls.Add(winter, 1, 0);
+            themeColumn.Controls.Add(winter);
+            summerCard = BuildSummerCard(out rain);
+            themeColumn.Controls.Add(summerCard);
             var winterBody = (TableLayoutPanel)winter.Controls[0];
             var winterGrid = DeskStyle.Flow(2);
             winterGrid.ColumnStyles[0] = new ColumnStyle(SizeType.Percent, 46);
@@ -154,20 +160,21 @@ namespace SnowDesk
             AddCheck(decorations, "Buz sarkıtları", () => settings.Icicles, value => settings.Icicles = value);
 
             var actions = DeskStyle.Card("Efekt başlat", 108);
-            actionCard = actions;
             body.Controls.Add(actions);
             var actionBody = (TableLayoutPanel)actions.Controls[0];
             var actionRow = DeskStyle.Flow(2);
             actionRow.ColumnStyles[0] = new ColumnStyle(SizeType.Percent, 100);
             actionRow.ColumnStyles[1] = new ColumnStyle(SizeType.AutoSize);
             actionBody.Controls.Add(actionRow);
-            var effects = DeskStyle.Select("Başlatılacak efekt");
-            effects.Items.AddRange(SnowAction.All);
-            effects.SelectedIndex = 0;
+            effects = DeskStyle.Select("Başlatılacak efekt");
             effects.Margin = new Padding(0, 1, 10, 0);
             actionRow.Controls.Add(effects, 0, 0);
             var play = DeskStyle.Button("Uygula", false);
-            play.Click += (sender, e) => app.RunSnowAction((SnowAction)effects.SelectedItem);
+            play.Click += (sender, e) =>
+            {
+                if (effects.SelectedItem is SnowAction) app.RunSnowAction((SnowAction)effects.SelectedItem);
+                else if (effects.SelectedItem is SummerAction) app.RunSummerAction((SummerAction)effects.SelectedItem);
+            };
             actionRow.Controls.Add(play, 1, 0);
 
             Sync();
@@ -186,9 +193,19 @@ namespace SnowDesk
                 status.Text = app.IsRunning ? "●  Efekt açık" : "○  Efekt duraklatıldı";
                 pause.Text = app.IsRunning ? "Duraklat" : "Devam et";
                 UpdatePreview();
-                density.SelectedIndex = settings.Density;
+                density.SelectedIndex = rain.SelectedIndex = settings.Density;
                 rate.SelectedIndex = Array.IndexOf(Rates, settings.Rate);
-                winterCard.Visible = actionCard.Visible = selected == DesktopTheme.Winter;
+                winterCard.Visible = selected == DesktopTheme.Winter;
+                summerCard.Visible = selected == DesktopTheme.Summer;
+                if (actionTheme != selected)
+                {
+                    actionTheme = selected;
+                    effects.Items.Clear();
+                    effects.SelectedIndex = -1;
+                    if (selected == DesktopTheme.Summer) effects.Items.AddRange(SummerAction.All);
+                    else effects.Items.AddRange(SnowAction.All);
+                    effects.SelectedIndex = 0;
+                }
                 foreach (Action update in updateChecks) update();
             }
             finally { syncing = false; }
@@ -255,6 +272,48 @@ namespace SnowDesk
             };
             updateChecks.Add(() => check.Checked = read());
             panel.Controls.Add(check);
+        }
+
+        private Control BuildSummerCard(out DeskSelect rainSelect)
+        {
+            var card = DeskStyle.Card("Yağmur ve yaz süsleri", 291);
+            var grid = DeskStyle.Flow(2);
+            grid.ColumnStyles[0] = new ColumnStyle(SizeType.Percent, 46);
+            grid.ColumnStyles[1] = new ColumnStyle(SizeType.Percent, 54);
+            ((TableLayoutPanel)card.Controls[0]).Controls.Add(grid);
+            var weather = DeskStyle.Flow(1);
+            weather.Margin = new Padding(0, 0, 10, 0);
+            grid.Controls.Add(weather, 0, 0);
+            DeskSelect select = AddSelect(weather, "Yağmur yoğunluğu", true, "Çisenti", "Sağanak", "Bardaktan boşanırcasına");
+            select.SelectedIndexChanged += delegate
+            {
+                if (syncing || select.SelectedIndex < 0) return;
+                settings.Density = select.SelectedIndex;
+                app.SaveSettings();
+            };
+            AddCheck(weather, "Pencerelerde su", () => settings.WindowLedges, app.SetWindowLedges, false);
+            AddCheck(weather, "Rüzgâr", () => settings.Wind, value => settings.Wind = value);
+
+            var extras = DeskStyle.Flow(1);
+            grid.Controls.Add(extras, 1, 0);
+            extras.Controls.Add(DeskStyle.Copy("Süslemeler"));
+            AddSummer(extras, "Simitli güneşlenen kız", SummerEffect.Bather);
+            AddSummer(extras, "Yağmurda koşan adam", SummerEffect.Runner);
+            AddSummer(extras, "Su pompası", SummerEffect.Pump);
+            AddSummer(extras, "Nilüfer ve kurbağa", SummerEffect.Pond);
+            AddSummer(extras, "Lastik ördek", SummerEffect.Duck);
+            AddSummer(extras, "Gökkuşağı ve güneş", SummerEffect.Rainbow);
+            rainSelect = select;
+            return card;
+        }
+
+        private void AddSummer(TableLayoutPanel panel, string title, SummerEffect effect)
+        {
+            AddCheck(panel, title, () => settings.Has(effect), enabled =>
+            {
+                if (enabled) settings.Summer |= effect;
+                else settings.Summer &= ~effect;
+            });
         }
 
         private void AddDecoration(TableLayoutPanel panel, string title, Effect effect)

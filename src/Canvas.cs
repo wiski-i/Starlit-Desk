@@ -52,6 +52,24 @@ namespace SnowDesk
             if (pen != null) graphics.DrawEllipse(pen, rect);
         }
 
+        internal void StrokeEllipse(Pen pen, Point center, double rx, double ry)
+        {
+            graphics.DrawEllipse(pen, (float)(center.X - rx), (float)(center.Y - ry), (float)(2 * rx), (float)(2 * ry));
+        }
+
+        /// <summary>Runs vector art with its origin at (x, y), scaled and optionally mirrored; the transform is restored.</summary>
+        internal void DrawArt(double x, double y, double scale, bool mirror, Action<Graphics> paint)
+        {
+            GraphicsState state = graphics.Save();
+            try
+            {
+                graphics.TranslateTransform((float)x, (float)y);
+                graphics.ScaleTransform((float)(mirror ? -scale : scale), (float)scale);
+                paint(graphics);
+            }
+            finally { graphics.Restore(state); }
+        }
+
         internal void DrawSnowLayer(Bitmap layer, int x, int y)
         {
             graphics.DrawImageUnscaled(layer, x, y);
