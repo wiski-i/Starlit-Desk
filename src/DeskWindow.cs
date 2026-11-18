@@ -14,7 +14,7 @@ namespace SnowDesk
         private readonly DeskThemePreview themePreview;
         private readonly Settings settings;
         private readonly List<Action> updateChecks = new List<Action>();
-        private readonly ComboBox themes, density, rate;
+        private readonly DeskSelect themes, density, rate;
         private readonly Label intro, status, themeDetail;
         private readonly Button pause;
         private readonly Control winterCard, actionCard;
@@ -34,8 +34,8 @@ namespace SnowDesk
             Font = new Font("Segoe UI", 10f);
             BackColor = DeskStyle.Background;
             ForeColor = DeskStyle.Text;
-            ClientSize = new Size(884, 665);
-            MinimumSize = new Size(680, 465);
+            ClientSize = new Size(884, 686);
+            MinimumSize = new Size(758, 465);
             FormClosing += KeepInTray;
 
             var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
@@ -93,7 +93,7 @@ namespace SnowDesk
             settingsRow.ColumnStyles[1] = new ColumnStyle(SizeType.Percent, 58);
             body.Controls.Add(settingsRow);
 
-            var general = DeskStyle.Card("Tema ve performans", 266);
+            var general = DeskStyle.Card("Tema ve performans", 280);
             general.Margin = new Padding(0, 0, 12, 12);
             settingsRow.Controls.Add(general, 0, 0);
             var options = (TableLayoutPanel)general.Controls[0];
@@ -120,11 +120,13 @@ namespace SnowDesk
             };
             AddCheck(options, "Windows ile başlat", Program.HasStartup, value => app.ToggleStartup(), false);
 
-            var winter = DeskStyle.Card("Kar ve süslemeler", 266);
+            var winter = DeskStyle.Card("Kar ve süslemeler", 280);
             winterCard = winter;
             settingsRow.Controls.Add(winter, 1, 0);
             var winterBody = (TableLayoutPanel)winter.Controls[0];
             var winterGrid = DeskStyle.Flow(2);
+            winterGrid.ColumnStyles[0] = new ColumnStyle(SizeType.Percent, 46);
+            winterGrid.ColumnStyles[1] = new ColumnStyle(SizeType.Percent, 54);
             winterBody.Controls.Add(winterGrid);
             var snow = DeskStyle.Flow(1);
             snow.Margin = new Padding(0, 0, 10, 0);
@@ -161,7 +163,7 @@ namespace SnowDesk
             var effects = DeskStyle.Select("Başlatılacak efekt");
             effects.Items.AddRange(SnowAction.All);
             effects.SelectedIndex = 0;
-            effects.Margin = new Padding(0, 3, 10, 0);
+            effects.Margin = new Padding(0, 1, 10, 0);
             actionRow.Controls.Add(effects, 0, 0);
             var play = DeskStyle.Button("Uygula", false);
             play.Click += (sender, e) => app.RunSnowAction((SnowAction)effects.SelectedItem);
@@ -231,10 +233,10 @@ namespace SnowDesk
             if (message.Msg == SettingChange) UpdatePreview();
         }
 
-        private static ComboBox AddSelect(TableLayoutPanel panel, string title, bool compact, params object[] choices)
+        private static DeskSelect AddSelect(TableLayoutPanel panel, string title, bool compact, params object[] choices)
         {
             panel.Controls.Add(DeskStyle.Copy(title));
-            ComboBox select = DeskStyle.Select(title);
+            DeskSelect select = DeskStyle.Select(title);
             select.Margin = new Padding(0, 4, 0, compact ? 6 : 8);
             select.Items.AddRange(choices);
             panel.Controls.Add(select);
@@ -243,13 +245,7 @@ namespace SnowDesk
 
         private void AddCheck(TableLayoutPanel panel, string title, Func<bool> read, Action<bool> change, bool save = true)
         {
-            var check = new CheckBox
-            {
-                Text = title, AutoSize = true, ForeColor = DeskStyle.Text,
-                BackColor = DeskStyle.Surface, FlatStyle = FlatStyle.Flat, UseCompatibleTextRendering = true,
-                UseVisualStyleBackColor = false, Anchor = AnchorStyles.Left,
-                Margin = new Padding(0, 1, 0, 2)
-            };
+            CheckBox check = DeskStyle.Toggle(title);
             check.CheckedChanged += delegate
             {
                 if (syncing) return;
@@ -279,9 +275,23 @@ namespace SnowDesk
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
+            const int ImmersiveDarkMode = 20;
+            const int BorderColor = 34;
+            const int CaptionColor = 35;
+            const int TextColor = 36;
+            if (SystemInformation.HighContrast) return;
             int dark = 1;
-            if (DwmSetWindowAttribute(Handle, 20, ref dark, sizeof(int)) != 0)
+            if (DwmSetWindowAttribute(Handle, ImmersiveDarkMode, ref dark, sizeof(int)) != 0)
                 DwmSetWindowAttribute(Handle, 19, ref dark, sizeof(int));
+            SetCaptionColor(BorderColor, DeskStyle.Border);
+            SetCaptionColor(CaptionColor, DeskStyle.Caption);
+            SetCaptionColor(TextColor, DeskStyle.Text);
+        }
+
+        private void SetCaptionColor(int attribute, Color color)
+        {
+            int value = ColorTranslator.ToWin32(color);
+            DwmSetWindowAttribute(Handle, attribute, ref value, sizeof(int));
         }
 
         protected override void Dispose(bool disposing)

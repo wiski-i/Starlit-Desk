@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -14,6 +15,11 @@ namespace SnowDesk
         internal static readonly Color Text = Color.FromArgb(250, 235, 241);
         internal static readonly Color Muted = Color.FromArgb(216, 176, 195);
         internal static readonly Color Accent = Color.FromArgb(249, 179, 204);
+        internal static readonly Color Caption = Color.FromArgb(40, 21, 34);
+        internal static readonly Color Hover = Color.FromArgb(69, 37, 55);
+        internal static readonly Bitmap Chevron = CreateChevron();
+        private static readonly Bitmap SwitchOff = CreateSwitch(false);
+        private static readonly Bitmap SwitchOn = CreateSwitch(true);
 
         internal static TableLayoutPanel Flow(int columns)
         {
@@ -45,22 +51,77 @@ namespace SnowDesk
             };
         }
 
-        internal static ComboBox Select(string label) { return new DeskSelect(label); }
+        internal static DeskSelect Select(string label) { return new DeskSelect(label); }
 
         internal static Button Button(string text, bool primary)
         {
-            var button = new Button
-            {
-                Text = text, Width = 118, Height = 32, Margin = Padding.Empty,
-                UseVisualStyleBackColor = false, UseCompatibleTextRendering = true,
-                FlatStyle = FlatStyle.Flat, BackColor = primary ? Accent : Input,
-                ForeColor = primary ? Background : Text
-            };
-            button.FlatAppearance.BorderSize = 0;
-            button.FlatAppearance.MouseOverBackColor = primary ? Color.FromArgb(255, 205, 224) : Border;
+            var button = new Button { Text = text, Width = 118, Height = 34 };
+            StyleButton(button, primary);
+            return button;
+        }
+
+        internal static void StyleButton(Button button, bool primary)
+        {
+            button.Margin = Padding.Empty;
+            button.UseVisualStyleBackColor = false;
+            button.UseCompatibleTextRendering = true;
+            button.FlatStyle = FlatStyle.Flat;
+            button.BackColor = primary ? Accent : Input;
+            button.ForeColor = primary ? Background : Text;
+            button.FlatAppearance.BorderSize = primary ? 0 : 1;
+            button.FlatAppearance.BorderColor = Border;
+            button.FlatAppearance.MouseOverBackColor = primary ? Color.FromArgb(255, 205, 224) : Hover;
+            button.FlatAppearance.MouseDownBackColor = primary ? Color.FromArgb(235, 149, 183) : Border;
             button.Resize += (sender, e) => RoundButton(button);
             RoundButton(button);
-            return button;
+        }
+
+        internal static CheckBox Toggle(string title)
+        {
+            var check = new CheckBox
+            {
+                Text = title, Appearance = Appearance.Button, AccessibleRole = AccessibleRole.CheckButton,
+                AutoSize = true, MinimumSize = new Size(0, 25), ForeColor = Text, BackColor = Surface,
+                FlatStyle = FlatStyle.Flat, UseCompatibleTextRendering = true, UseVisualStyleBackColor = false,
+                Image = SwitchOff, ImageAlign = ContentAlignment.MiddleLeft,
+                TextAlign = ContentAlignment.MiddleLeft, TextImageRelation = TextImageRelation.ImageBeforeText,
+                Anchor = AnchorStyles.Left, Margin = new Padding(0, 1, 0, 1)
+            };
+            check.FlatAppearance.BorderSize = 0;
+            check.FlatAppearance.CheckedBackColor = Surface;
+            check.FlatAppearance.MouseOverBackColor = Input;
+            check.FlatAppearance.MouseDownBackColor = Hover;
+            check.CheckedChanged += (sender, e) => check.Image = check.Checked ? SwitchOn : SwitchOff;
+            return check;
+        }
+
+        private static Bitmap CreateSwitch(bool enabled)
+        {
+            var glyph = new Bitmap(28, 16);
+            using (Graphics graphics = Graphics.FromImage(glyph))
+            using (GraphicsPath track = Rounded(new Rectangle(0, 1, 24, 13), 6))
+            using (var fill = new SolidBrush(enabled ? Accent : Input))
+            using (var rim = new Pen(enabled ? Accent : Border))
+            using (var thumb = new SolidBrush(enabled ? Background : Muted))
+            {
+                graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                graphics.FillPath(fill, track);
+                graphics.DrawPath(rim, track);
+                graphics.FillEllipse(thumb, enabled ? 13 : 3, 4, 8, 8);
+            }
+            return glyph;
+        }
+
+        private static Bitmap CreateChevron()
+        {
+            var glyph = new Bitmap(12, 12);
+            using (Graphics graphics = Graphics.FromImage(glyph))
+            using (var pen = new Pen(Muted, 1.4f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+            {
+                graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                graphics.DrawLines(pen, new[] { new Point(2, 4), new Point(6, 8), new Point(10, 4) });
+            }
+            return glyph;
         }
 
         private static void RoundButton(Button button)
@@ -96,36 +157,120 @@ namespace SnowDesk
         }
     }
 
-    internal sealed class DeskSelect : ComboBox
+    internal sealed class DeskSelect : Button
     {
+        private readonly ContextMenuStrip menu = new ContextMenuStrip();
+        internal readonly List<object> Items = new List<object>();
+        internal event EventHandler SelectedIndexChanged;
+        private int selectedIndex = -1;
+
         internal DeskSelect(string label)
         {
+            DeskStyle.StyleButton(this, false);
             AccessibleName = label;
-            DropDownStyle = ComboBoxStyle.DropDownList;
-            BackColor = DeskStyle.Input;
-            ForeColor = DeskStyle.Text;
+            AccessibleRole = AccessibleRole.ComboBox;
             Dock = DockStyle.Top;
-            FlatStyle = FlatStyle.Flat;
-            IntegralHeight = false;
-            DropDownHeight = 196;
-            DrawMode = DrawMode.OwnerDrawFixed;
+            Height = 32;
+            Padding = new Padding(9, 0, 9, 0);
+            UseMnemonic = false;
+            AutoEllipsis = true;
+            Image = DeskStyle.Chevron;
+            TextAlign = ContentAlignment.MiddleLeft;
+            ImageAlign = ContentAlignment.MiddleRight;
+            TextImageRelation = TextImageRelation.TextBeforeImage;
+            menu.ShowImageMargin = false;
+            menu.ShowCheckMargin = true;
+            menu.Renderer = new ToolStripProfessionalRenderer(new DeskMenuColors());
         }
 
-        protected override void OnDrawItem(DrawItemEventArgs e)
+        internal int SelectedIndex
         {
-            bool active = (e.State & DrawItemState.Selected) != 0;
-            using (var fill = new SolidBrush(active ? DeskStyle.Border : BackColor))
-                e.Graphics.FillRectangle(fill, e.Bounds);
-            if (e.Index >= 0)
+            get { return selectedIndex; }
+            set
             {
-                Rectangle text = e.Bounds;
-                text.Inflate(-5, 0);
-                TextRenderer.DrawText(e.Graphics, GetItemText(Items[e.Index]), Font, text, ForeColor,
-                    TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis |
-                    TextFormatFlags.PreserveGraphicsClipping | TextFormatFlags.PreserveGraphicsTranslateTransform);
+                if (value < -1 || value >= Items.Count) throw new ArgumentOutOfRangeException("value");
+                if (value == selectedIndex) return;
+                selectedIndex = value;
+                Text = value < 0 ? string.Empty : Items[value].ToString();
+                if (SelectedIndexChanged != null) SelectedIndexChanged(this, EventArgs.Empty);
             }
-            e.DrawFocusRectangle();
         }
+
+        internal object SelectedItem
+        {
+            get { return selectedIndex < 0 ? null : Items[selectedIndex]; }
+            set { SelectedIndex = Items.IndexOf(value); }
+        }
+
+        protected override void OnClick(EventArgs e)
+        {
+            base.OnClick(e);
+            if (Items.Count == 0 || menu.Visible) return;
+            while (menu.Items.Count != 0)
+            {
+                ToolStripItem previous = menu.Items[0];
+                menu.Items.RemoveAt(0);
+                previous.Dispose();
+            }
+            menu.Font = Font;
+            menu.MinimumSize = new Size(Width, 0);
+            for (int index = 0; index < Items.Count; index++)
+            {
+                int optionIndex = index;
+                var item = new ToolStripMenuItem(Items[index].ToString())
+                {
+                    Checked = index == SelectedIndex, ForeColor = DeskStyle.Text,
+                    AutoSize = false, Size = new Size(Math.Max(120, Width - 4), Math.Max(27, Font.Height + 9))
+                };
+                item.Click += (sender, args) => SelectedIndex = optionIndex;
+                menu.Items.Add(item);
+            }
+
+            Form owner = FindForm();
+            bool below = owner == null || PointToScreen(new Point(0, Height)).Y +
+                menu.GetPreferredSize(Size.Empty).Height <= owner.RectangleToScreen(owner.ClientRectangle).Bottom;
+            menu.Show(this, new Point(0, below ? Height : 0),
+                below ? ToolStripDropDownDirection.BelowRight : ToolStripDropDownDirection.AboveRight);
+            if (SelectedIndex >= 0) menu.Items[SelectedIndex].Select();
+        }
+
+        protected override bool ProcessCmdKey(ref Message message, Keys keyData)
+        {
+            if (keyData == Keys.F4 || keyData == (Keys.Alt | Keys.Down))
+            {
+                PerformClick();
+                return true;
+            }
+            if (Items.Count > 0 && (keyData == Keys.Up || keyData == Keys.Down))
+            {
+                SelectedIndex = Math.Max(0, Math.Min(Items.Count - 1, SelectedIndex + (keyData == Keys.Up ? -1 : 1)));
+                return true;
+            }
+            return base.ProcessCmdKey(ref message, keyData);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) menu.Dispose();
+            base.Dispose(disposing);
+        }
+    }
+
+    internal sealed class DeskMenuColors : ProfessionalColorTable
+    {
+        public override Color ToolStripDropDownBackground { get { return DeskStyle.Surface; } }
+        public override Color MenuBorder { get { return DeskStyle.Border; } }
+        public override Color MenuItemBorder { get { return DeskStyle.Border; } }
+        public override Color MenuItemSelected { get { return DeskStyle.Hover; } }
+        public override Color MenuItemSelectedGradientBegin { get { return DeskStyle.Hover; } }
+        public override Color MenuItemSelectedGradientEnd { get { return DeskStyle.Hover; } }
+        public override Color ImageMarginGradientBegin { get { return DeskStyle.Surface; } }
+        public override Color ImageMarginGradientMiddle { get { return DeskStyle.Surface; } }
+        public override Color ImageMarginGradientEnd { get { return DeskStyle.Surface; } }
+        public override Color ButtonSelectedBorder { get { return DeskStyle.Accent; } }
+        public override Color ButtonPressedBorder { get { return DeskStyle.Border; } }
+        public override Color CheckBackground { get { return DeskStyle.Accent; } }
+        public override Color CheckSelectedBackground { get { return DeskStyle.Accent; } }
     }
 
     internal sealed class DeskCard : Panel
