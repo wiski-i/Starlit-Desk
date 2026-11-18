@@ -51,6 +51,8 @@ Derleme, Windows’taki .NET Framework’ün 64 bit C# derleyicisini kullanır. 
 
 `DesktopScene` arayüzünü uygulayan bir sınıf yaz ve [src/DesktopTheme.cs](src/DesktopTheme.cs) içindeki kataloğa kaydet. Her tema sabit bir kimlik, görünen ad, açıklama ve her ekran için ayrı efekt örneği üreten bir işlev kullanır. Temayı `DesktopTheme.All` listesine eklediğinde seçicide görünür. Kayıtlı teması bulunamayan veya eski ayar dosyası kullanan kurulumlar **Kış** temasıyla açılır.
 
+Animasyonlu önizleme için GIF dosyasını [`branding/previews/`](branding/previews/) klasörüne koy ve tema kaydında `StarlitDesk.Previews.<dosya>.gif` kaynağını belirt. Önizleme seçilen temanın kartında oynar. Efekt duraklatıldığında veya Windows animasyon efektleri kapatıldığında GIF sabit kalır.
+
 | Yol | İçerik |
 | --- | --- |
 | [src/DeskWindow.cs](src/DeskWindow.cs) | Kontrol paneli ve ayarlar |

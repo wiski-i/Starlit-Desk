@@ -11,6 +11,7 @@ namespace SnowDesk
     {
         private static readonly int[] Rates = { 20, 30, 60 };
         private readonly Program app;
+        private readonly DeskCard hero;
         private readonly Settings settings;
         private readonly List<Action> updateChecks = new List<Action>();
         private readonly ComboBox themes, density, rate;
@@ -61,7 +62,7 @@ namespace SnowDesk
             header.Controls.Add(brand, 1, 0);
             body.Controls.Add(header);
 
-            var hero = new DeskCard(true) { Dock = DockStyle.Top, Height = 137 };
+            hero = new DeskCard(true) { Dock = DockStyle.Top, Height = 137 };
             body.Controls.Add(hero);
             var heroGrid = DeskStyle.Flow(2);
             heroGrid.Dock = DockStyle.Fill;
@@ -173,12 +174,39 @@ namespace SnowDesk
                 intro.Text = selected.Name;
                 status.Text = app.IsRunning ? "●  Efekt açık" : "○  Efekt duraklatıldı";
                 pause.Text = app.IsRunning ? "Duraklat" : "Devam et";
+                UpdatePreview();
                 density.SelectedIndex = settings.Density;
                 rate.SelectedIndex = Array.IndexOf(Rates, settings.Rate);
                 winterCard.Visible = actionCard.Visible = selected == DesktopTheme.Winter;
                 foreach (Action update in updateChecks) update();
             }
             finally { syncing = false; }
+        }
+
+        private void UpdatePreview()
+        {
+            if (hero != null)
+                hero.SetPreview(settings.Theme.PreviewResource,
+                    Visible && app.IsRunning && WindowState != FormWindowState.Minimized);
+        }
+
+        protected override void OnVisibleChanged(EventArgs e)
+        {
+            base.OnVisibleChanged(e);
+            UpdatePreview();
+        }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            UpdatePreview();
+        }
+
+        protected override void WndProc(ref Message message)
+        {
+            base.WndProc(ref message);
+            const int SettingChange = 0x001A;
+            if (message.Msg == SettingChange) UpdatePreview();
         }
 
         private static ComboBox AddSelect(TableLayoutPanel panel, string title, bool compact, params object[] choices)

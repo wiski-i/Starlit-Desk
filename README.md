@@ -51,6 +51,8 @@ The build uses the 64-bit C# compiler included with .NET Framework on Windows. T
 
 Create a `DesktopScene` implementation and give it a catalog entry in [src/DesktopTheme.cs](src/DesktopTheme.cs). Each entry uses a stable ID, a display name, a description and a factory that creates one scene per monitor. Include the entry in `DesktopTheme.All` to show it in the selector. Keep the ID stable to preserve saved selections. Missing or older theme selections resolve to Winter.
 
+To add an animated preview, place a GIF in [`branding/previews/`](branding/previews/) and set the entry’s preview resource to `StarlitDesk.Previews.<file>.gif`. The preview plays in the selected theme card. Pausing the effect or turning off Windows animation effects pauses the GIF.
+
 | Path | Purpose |
 | --- | --- |
 | [src/DeskWindow.cs](src/DeskWindow.cs) | Control panel and settings |

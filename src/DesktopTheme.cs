@@ -8,21 +8,24 @@ namespace SnowDesk
     {
         internal static readonly DesktopTheme Winter = new DesktopTheme(
             "winter", "Kış", "Pencerelerin üzerinde biriken kar ve kış süsleri.",
-            display => new SnowField(display));
+            display => new SnowField(display), "StarlitDesk.Previews.winter.gif");
 
         internal static readonly IReadOnlyList<DesktopTheme> All = Array.AsReadOnly(new[] { Winter });
 
         internal readonly string Id;
         internal readonly string Name;
         internal readonly string Description;
+        internal readonly string PreviewResource;
         internal readonly Func<Forms.Screen, DesktopScene> CreateScene;
 
-        private DesktopTheme(string id, string name, string description, Func<Forms.Screen, DesktopScene> createScene)
+        private DesktopTheme(string id, string name, string description,
+            Func<Forms.Screen, DesktopScene> createScene, string previewResource = null)
         {
             Id = id;
             Name = name;
             Description = description;
             CreateScene = createScene;
+            PreviewResource = previewResource;
         }
 
         internal static DesktopTheme FromId(string id)

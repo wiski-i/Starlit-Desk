@@ -49,15 +49,19 @@ namespace SnowDesk
 
         internal static Button Button(string text, bool primary)
         {
-            var button = new Button
-            {
-                Text = text, Width = 118, Height = 32, UseVisualStyleBackColor = false,
-                FlatStyle = FlatStyle.Flat, BackColor = primary ? Accent : Input,
-                ForeColor = primary ? Background : Text, Margin = Padding.Empty
-            };
-            button.FlatAppearance.BorderColor = primary ? Accent : Border;
-            button.FlatAppearance.MouseOverBackColor = primary ? Color.FromArgb(255, 205, 224) : Border;
-            return button;
+            return new DeskButton(text, primary);
+        }
+
+        internal static GraphicsPath Rounded(Rectangle bounds, int radius)
+        {
+            int size = radius * 2;
+            var path = new GraphicsPath();
+            path.AddArc(bounds.Left, bounds.Top, size, size, 180, 90);
+            path.AddArc(bounds.Right - size, bounds.Top, size, size, 270, 90);
+            path.AddArc(bounds.Right - size, bounds.Bottom - size, size, size, 0, 90);
+            path.AddArc(bounds.Left, bounds.Bottom - size, size, size, 90, 90);
+            path.CloseFigure();
+            return path;
         }
 
         internal static DeskCard Card(string title, int height)
@@ -69,6 +73,46 @@ namespace SnowDesk
             content.Controls.Add(heading);
             card.Controls.Add(content);
             return card;
+        }
+    }
+
+    internal sealed class DeskButton : Button
+    {
+        private readonly bool primary;
+
+        internal DeskButton(string text, bool primary)
+        {
+            this.primary = primary;
+            Text = text;
+            Width = 118;
+            Height = 32;
+            Margin = Padding.Empty;
+            UseVisualStyleBackColor = false;
+            FlatStyle = FlatStyle.Flat;
+            BackColor = Color.Transparent;
+            ForeColor = primary ? DeskStyle.Background : DeskStyle.Text;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics graphics = e.Graphics;
+            graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            bool hover = ClientRectangle.Contains(PointToClient(MousePosition));
+            Color normal = primary ? DeskStyle.Accent : DeskStyle.Input;
+            Color hoverColor = primary ? Color.FromArgb(255, 205, 224) : DeskStyle.Border;
+            Color stroke = Focused && ShowFocusCues
+                ? (primary ? DeskStyle.Background : DeskStyle.Accent)
+                : (primary ? normal : DeskStyle.Border);
+            var bounds = new Rectangle(1, 1, Width - 3, Height - 3);
+            using (GraphicsPath shape = DeskStyle.Rounded(bounds, 8))
+            using (var fill = new SolidBrush(hover ? hoverColor : normal))
+            using (var edge = new Pen(stroke))
+            {
+                graphics.FillPath(fill, shape);
+                graphics.DrawPath(edge, shape);
+            }
+            TextRenderer.DrawText(graphics, Text, Font, ClientRectangle, ForeColor,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
         }
     }
 
@@ -113,15 +157,20 @@ namespace SnowDesk
         private void DrawField(Graphics graphics)
         {
             Rectangle bounds = ClientRectangle;
-            if (bounds.Width < 32 || bounds.Height < 4) return;
+            if (bounds.Width < 32 || bounds.Height < 14) return;
             int arrowWidth = Math.Max(20, bounds.Height);
+            graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            var field = new Rectangle(0, 0, bounds.Width - 1, bounds.Height - 1);
+            using (var behind = new SolidBrush(DeskStyle.Surface))
+            using (GraphicsPath shape = DeskStyle.Rounded(field, 6))
             using (var fill = new SolidBrush(BackColor))
             using (var edge = new Pen(Focused ? DeskStyle.Accent : DeskStyle.Border))
             using (var arrow = new Pen(DeskStyle.Muted, 1.5f))
             {
-                graphics.FillRectangle(fill, bounds);
-                graphics.DrawRectangle(edge, 0, 0, bounds.Width - 1, bounds.Height - 1);
-                graphics.DrawLine(edge, bounds.Right - arrowWidth, 2, bounds.Right - arrowWidth, bounds.Bottom - 3);
+                graphics.FillRectangle(behind, bounds);
+                graphics.FillPath(fill, shape);
+                graphics.DrawPath(edge, shape);
+                graphics.DrawLine(edge, bounds.Right - arrowWidth, 5, bounds.Right - arrowWidth, bounds.Bottom - 6);
                 int x = bounds.Right - arrowWidth / 2, y = bounds.Height / 2;
                 graphics.DrawLines(arrow, new[] { new Point(x - 4, y - 2), new Point(x, y + 2), new Point(x + 4, y - 2) });
             }
@@ -155,15 +204,16 @@ namespace SnowDesk
             Graphics graphics = e.Graphics;
             int size = BoxSize;
             var square = new Rectangle(1, (Height - size) / 2, size, size);
+            graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (GraphicsPath shape = DeskStyle.Rounded(square, 3))
             using (var fill = new SolidBrush(Checked ? DeskStyle.Accent : DeskStyle.Input))
             using (var border = new Pen(Checked ? DeskStyle.Accent : DeskStyle.Muted))
             {
-                graphics.FillRectangle(fill, square);
-                graphics.DrawRectangle(border, square);
+                graphics.FillPath(fill, shape);
+                graphics.DrawPath(border, shape);
             }
             if (Checked)
             {
-                graphics.SmoothingMode = SmoothingMode.AntiAlias;
                 using (var tick = new Pen(DeskStyle.Background, 1.8f))
                 {
                     int middle = square.Top + size / 2;
@@ -188,10 +238,16 @@ namespace SnowDesk
     internal sealed class DeskCard : Panel
     {
         private readonly bool hero;
+        private readonly Timer previewClock;
+        private ThemePreview preview;
+        private string previewResource;
+        private bool previewPlaying;
 
         internal DeskCard(bool hero)
         {
             this.hero = hero;
+            if (hero) previewClock = new Timer();
+            if (previewClock != null) previewClock.Tick += AdvancePreview;
             BackColor = DeskStyle.Background;
             Padding = new Padding(17, 13, 17, 13);
             Margin = new Padding(0, 0, 0, 12);
@@ -199,14 +255,78 @@ namespace SnowDesk
             ResizeRedraw = true;
         }
 
+        internal void SetPreview(string resource, bool playing)
+        {
+            if (resource != previewResource)
+            {
+                previewClock.Stop();
+                if (preview != null) preview.Dispose();
+                preview = ThemePreview.Load(resource);
+                previewResource = resource;
+                Invalidate(true);
+            }
+            previewPlaying = playing;
+            UpdatePreviewPlayback();
+        }
+
+        protected override void OnVisibleChanged(EventArgs e)
+        {
+            base.OnVisibleChanged(e);
+            UpdatePreviewPlayback();
+        }
+
+        private void UpdatePreviewPlayback()
+        {
+            if (previewClock == null) return;
+            bool animate = Visible && previewPlaying && preview != null && preview.IsAnimated &&
+                ThemePreview.WindowsAllowsAnimation();
+            if (animate && !previewClock.Enabled)
+                previewClock.Interval = preview.Delay;
+            previewClock.Enabled = animate;
+        }
+
+        private void AdvancePreview(object sender, EventArgs e)
+        {
+            if (!ThemePreview.WindowsAllowsAnimation())
+            {
+                previewClock.Stop();
+                return;
+            }
+            preview.Advance();
+            previewClock.Interval = preview.Delay;
+            int left = Width * 36 / 100;
+            Invalidate(new Rectangle(left, 0, Width - left, Height), true);
+        }
+
+        private void DrawPreview(Graphics graphics, Rectangle bounds)
+        {
+            int left = bounds.Left + bounds.Width * 36 / 100;
+            var imageArea = Rectangle.FromLTRB(left, bounds.Top, bounds.Right, bounds.Bottom);
+            graphics.DrawImage(preview.Image, imageArea);
+            var fadeArea = new Rectangle(left - 1, bounds.Top, imageArea.Width / 4, bounds.Height);
+            using (var fade = new LinearGradientBrush(fadeArea, Color.FromArgb(48, 25, 40),
+                Color.FromArgb(0, 48, 25, 40), LinearGradientMode.Horizontal))
+                graphics.FillRectangle(fade, fadeArea);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                if (previewClock != null) previewClock.Dispose();
+                if (preview != null) preview.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+
         protected override void OnPaintBackground(PaintEventArgs e)
         {
             base.OnPaintBackground(e);
-            if (Width < 28 || Height < 28) return;
+            if (Width < 44 || Height < 44) return;
             Graphics graphics = e.Graphics;
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
             var bounds = new Rectangle(1, 1, Width - 3, Height - 3);
-            using (GraphicsPath outline = Rounded(bounds, 13))
+            using (GraphicsPath outline = DeskStyle.Rounded(bounds, hero ? 20 : 17))
             using (var border = new Pen(DeskStyle.Border))
             {
                 if (hero)
@@ -216,7 +336,8 @@ namespace SnowDesk
                         graphics.FillPath(fill, outline);
                     GraphicsState previous = graphics.Save();
                     graphics.SetClip(outline);
-                    DrawConstellation(graphics, bounds);
+                    if (preview == null) DrawConstellation(graphics, bounds);
+                    else DrawPreview(graphics, bounds);
                     graphics.Restore(previous);
                 }
                 else
@@ -268,16 +389,5 @@ namespace SnowDesk
             });
         }
 
-        private static GraphicsPath Rounded(Rectangle bounds, int radius)
-        {
-            int size = radius * 2;
-            var path = new GraphicsPath();
-            path.AddArc(bounds.Left, bounds.Top, size, size, 180, 90);
-            path.AddArc(bounds.Right - size, bounds.Top, size, size, 270, 90);
-            path.AddArc(bounds.Right - size, bounds.Bottom - size, size, size, 0, 90);
-            path.AddArc(bounds.Left, bounds.Bottom - size, size, size, 90, 90);
-            path.CloseFigure();
-            return path;
-        }
     }
 }
