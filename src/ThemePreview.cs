@@ -10,7 +10,8 @@ namespace SnowDesk
     internal abstract class ThemePreview : IDisposable
     {
         internal abstract void Advance(double seconds, Settings settings);
-        internal abstract void Draw(Graphics graphics, Rectangle destination);
+        /// <summary>Latest rendered frame; the panel scales it uniformly and clips it to rounded corners.</summary>
+        internal abstract Bitmap Frame { get; }
         public abstract void Dispose();
 
         internal static bool WindowsAllowsAnimation()
@@ -63,10 +64,7 @@ namespace SnowDesk
             canvas.Flush();
         }
 
-        internal override void Draw(Graphics graphics, Rectangle destination)
-        {
-            graphics.DrawImage(frame, destination);
-        }
+        internal override Bitmap Frame { get { return frame; } }
 
         private static Desktop.WindowBounds WindowEdge(int id, Rectangle bounds)
         {

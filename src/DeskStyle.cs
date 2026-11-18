@@ -91,15 +91,16 @@ namespace SnowDesk
             };
             check.FlatAppearance.BorderSize = 0;
             check.FlatAppearance.CheckedBackColor = Surface;
-            check.FlatAppearance.MouseOverBackColor = Input;
-            check.FlatAppearance.MouseDownBackColor = Hover;
+            // A filled hover rectangle clashed with the rounded cards; the switch itself is the cue.
+            check.FlatAppearance.MouseOverBackColor = Surface;
+            check.FlatAppearance.MouseDownBackColor = Surface;
             check.CheckedChanged += (sender, e) => check.Image = check.Checked ? SwitchOn : SwitchOff;
             return check;
         }
 
         private static Bitmap CreateSwitch(bool enabled)
         {
-            var glyph = new Bitmap(28, 16);
+            var glyph = new Bitmap(33, 16); // Track 24 px plus a gap before the label.
             using (Graphics graphics = Graphics.FromImage(glyph))
             using (GraphicsPath track = Rounded(new Rectangle(0, 1, 24, 13), 6))
             using (var fill = new SolidBrush(enabled ? Accent : Input))
@@ -146,12 +147,13 @@ namespace SnowDesk
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 
-        internal static void RoundControl(Control control, int corner)
+        [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
+        private static extern int SetWindowTheme(IntPtr hwnd, string subApp, string subIdList);
+
+        /// <summary>Gives a scrolling container the dark Windows scrollbars instead of the light default.</summary>
+        internal static void DarkScrollbars(Control control)
         {
-            int radius = Math.Min(corner, Math.Min(control.Width, control.Height) / 2);
-            if (radius == 0) return;
-            using (GraphicsPath shape = Rounded(control.ClientRectangle, radius))
-                control.Region = new Region(shape);
+            control.HandleCreated += (sender, e) => SetWindowTheme(control.Handle, "DarkMode_Explorer", null);
         }
 
         internal static GraphicsPath Rounded(Rectangle bounds, int radius)
@@ -455,9 +457,7 @@ namespace SnowDesk
             {
                 if (hero)
                 {
-                    using (var fill = new LinearGradientBrush(bounds, DeskStyle.Surface,
-                        Color.FromArgb(74, 43, 64), 14f))
-                        graphics.FillPath(fill, outline);
+                    using (Brush fill = HeroFill(Size)) graphics.FillPath(fill, outline);
                 }
                 else
                 {
@@ -468,6 +468,12 @@ namespace SnowDesk
             }
         }
 
+        /// <summary>Hero gradient in card coordinates, shared with children that paint over it.</summary>
+        internal static Brush HeroFill(Size card)
+        {
+            return new LinearGradientBrush(new Rectangle(1, 1, card.Width - 3, card.Height - 3),
+                DeskStyle.Surface, Color.FromArgb(74, 43, 64), 14f);
+        }
     }
 
     internal sealed class DeskThemePreview : Control
@@ -483,7 +489,6 @@ namespace SnowDesk
             SetStyle(ControlStyles.Opaque | ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
                 ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
             BackColor = DeskStyle.Surface;
-            Resize += (sender, e) => DeskStyle.RoundControl(this, 13);
             Dock = DockStyle.Fill;
             Margin = new Padding(4, 0, 10, 0);
             TabStop = false;
@@ -534,14 +539,48 @@ namespace SnowDesk
         {
             if (Width < 24 || Height < 24) return;
             Graphics graphics = e.Graphics;
+            PaintHeroBackground(graphics);
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            if (preview != null)
+            // Uniform scale keeps the miniature desktop and its flakes undistorted at every panel width.
+            Size source = preview == null ? ClientSize : preview.Frame.Size;
+            float scale = Math.Min((float)Width / source.Width, (float)Height / source.Height);
+            int width = (int)(source.Width * scale), height = (int)(source.Height * scale);
+            var art = new Rectangle((Width - width) / 2, (Height - height) / 2, width - 1, height - 1);
+            int radius = Math.Min(13 * DeviceDpi / 96, art.Height / 2);
+            // An antialiased path fill replaces the old Region clip, whose corners stepped by whole pixels.
+            using (GraphicsPath shape = DeskStyle.Rounded(art, radius))
             {
-                preview.Draw(graphics, ClientRectangle);
+                if (preview != null)
+                {
+                    using (var texture = new TextureBrush(preview.Frame, WrapMode.Clamp))
+                    {
+                        texture.TranslateTransform(art.X, art.Y);
+                        texture.ScaleTransform(scale, scale);
+                        graphics.FillPath(texture, shape);
+                    }
+                    return;
+                }
+                using (var fill = new SolidBrush(DeskStyle.Surface)) graphics.FillPath(fill, shape);
+                graphics.SetClip(shape);
+                DrawConstellation(graphics, art);
+                graphics.ResetClip();
+            }
+        }
+
+        private void PaintHeroBackground(Graphics graphics)
+        {
+            Control hero = Parent;
+            while (hero != null && !(hero is DeskCard)) hero = hero.Parent;
+            if (hero == null)
+            {
+                graphics.Clear(DeskStyle.Surface);
                 return;
             }
-            using (var fill = new SolidBrush(BackColor)) graphics.FillRectangle(fill, ClientRectangle);
-            DrawConstellation(graphics, ClientRectangle);
+            Point origin = hero.PointToClient(PointToScreen(Point.Empty));
+            graphics.TranslateTransform(-origin.X, -origin.Y);
+            using (Brush fill = DeskCard.HeroFill(hero.ClientSize))
+                graphics.FillRectangle(fill, new Rectangle(origin, Size));
+            graphics.ResetTransform();
         }
 
         protected override void Dispose(bool disposing)

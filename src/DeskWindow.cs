@@ -39,6 +39,7 @@ namespace SnowDesk
             FormClosing += KeepInTray;
 
             var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
+            DeskStyle.DarkScrollbars(scroll);
             var body = DeskStyle.Flow(1);
             body.Dock = DockStyle.Top;
             body.Padding = new Padding(22, 14, 22, 10);
