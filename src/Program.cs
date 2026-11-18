@@ -2,14 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Runtime.InteropServices;
 using System.Threading;
 using Microsoft.Win32;
 using Drawing = System.Drawing;
 using Forms = System.Windows.Forms;
 
-[assembly: System.Reflection.AssemblyTitle("SnowDesk for Windows")]
-[assembly: System.Reflection.AssemblyDescription("Offline desktop snowfall overlay")]
+[assembly: System.Reflection.AssemblyTitle("Starlit Desk")]
+[assembly: System.Reflection.AssemblyProduct("Starlit Desk")]
+[assembly: System.Reflection.AssemblyDescription("Offline desktop effects for Windows")]
 [assembly: System.Reflection.AssemblyVersion("1.11.0.0")]
 
 namespace SnowDesk
@@ -18,7 +18,7 @@ namespace SnowDesk
     {
         private const string StartupKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
         private const string StartupValue = "SnowDeskWindows";
-        private readonly Settings settings = Settings.Load();
+        private readonly Settings settings;
         private readonly List<Overlay> overlays = new List<Overlay>();
         private FrameSurface frameSurface;
         private readonly List<IntPtr> winEventHooks = new List<IntPtr>();
@@ -29,6 +29,7 @@ namespace SnowDesk
         private readonly Desktop.EventHandler windowsChanged;
         private readonly Forms.NotifyIcon tray;
         private readonly Drawing.Icon icon;
+        private DeskWindow dashboard;
         private bool running = true;
         private bool sessionLocked;
         private bool geometryDirty;
@@ -38,7 +39,7 @@ namespace SnowDesk
         private Desktop.Point cursor;
 
         [STAThread]
-        private static void Main()
+        private static void Main(string[] args)
         {
             bool created;
             using (var instance = new Mutex(true, @"Local\SnowDeskWindows", out created))
@@ -51,46 +52,49 @@ namespace SnowDesk
                     Forms.Application.SetUnhandledExceptionMode(Forms.UnhandledExceptionMode.ThrowException);
                     using (var app = new Program())
                     {
-                        app.Start();
+                        app.Start(Array.IndexOf(args, "--background") < 0);
                         Forms.Application.Run(app);
                     }
                 }
                 catch (Exception error)
                 {
-                    Forms.MessageBox.Show("SnowDesk could not run. " + error.Message, "SnowDesk",
+                    Forms.MessageBox.Show("Starlit Desk başlatılamadı. " + error.Message, "Starlit Desk",
                         Forms.MessageBoxButtons.OK, Forms.MessageBoxIcon.Error);
                 }
                 finally { instance.ReleaseMutex(); }
             }
         }
 
-        private Program()
+        internal Program(Settings preferences = null)
         {
+            settings = preferences ?? Settings.Load();
             frameClock = new FrameClock(RunOnUiThread, Render, settings.Rate);
             windowsTimer = new Forms.Timer { Interval = 100 };
             windowsTimer.Tick += RefreshDesktop;
             windowsChanged = OnWindowEvent;
-            icon = MakeIcon();
+            icon = Drawing.Icon.ExtractAssociatedIcon(Forms.Application.ExecutablePath) ??
+                (Drawing.Icon)Drawing.SystemIcons.Application.Clone();
             tray = new Forms.NotifyIcon
             {
                 Icon = icon,
-                Text = "SnowDesk - Snow on",
+                Text = "Starlit Desk - Efekt açık",
                 ContextMenuStrip = CreateMenu(),
                 Visible = true
             };
             tray.MouseClick += delegate(object sender, Forms.MouseEventArgs e)
             {
-                if (e.Button == Forms.MouseButtons.Left) ToggleSnow();
+                if (e.Button == Forms.MouseButtons.Left) ShowDashboard();
             };
         }
 
-        private void Start()
+        internal void Start(bool showDashboard)
         {
             uiThread.CreateControl();
             SystemEvents.DisplaySettingsChanged += DisplayChanged;
             SystemEvents.SessionSwitch += SessionChanged;
             RebuildDisplays();
             SetHooks();
+            if (showDashboard) ShowDashboard();
         }
 
         protected override void Dispose(bool disposing)
@@ -107,6 +111,7 @@ namespace SnowDesk
                 tray.Visible = false;
                 tray.ContextMenuStrip.Dispose();
                 tray.Dispose();
+                if (dashboard != null) dashboard.Dispose();
                 icon.Dispose();
                 uiThread.Dispose();
             }
@@ -183,7 +188,7 @@ namespace SnowDesk
             foreach (Overlay overlay in overlays)
             {
                 overlay.Close();
-                overlay.Field.Dispose();
+                overlay.Scene.Dispose();
             }
             overlays.Clear();
             ReleaseFrameSurface();
@@ -200,7 +205,7 @@ namespace SnowDesk
         {
             CloseDisplays();
             foreach (Forms.Screen screen in Forms.Screen.AllScreens)
-                overlays.Add(new Overlay(screen));
+                overlays.Add(new Overlay(screen, settings.Theme));
             RefreshDesktop(null, EventArgs.Empty);
         }
 
@@ -217,7 +222,7 @@ namespace SnowDesk
             {
                 if (!active || overlay.DisplayName == fullscreen)
                 {
-                    if (overlay.IsVisible) overlay.Field.ResetPointer();
+                    if (overlay.IsVisible) overlay.Scene.ResetPointer();
                     overlay.Close();
                     continue;
                 }
@@ -239,11 +244,12 @@ namespace SnowDesk
                 frameSurface = new FrameSurface(size);
             }
 
-            var geometry = settings.WindowLedges ? Desktop.ReadWindows(ShellChanged, shellFocus) : new List<Desktop.WindowBounds>();
+            bool needsGeometry = overlays.Exists(item => item.Scene.UsesWindowGeometry(settings));
+            var geometry = needsGeometry ? Desktop.ReadWindows(ShellChanged, shellFocus) : new List<Desktop.WindowBounds>();
             foreach (Overlay overlay in overlays)
             {
                 if (overlay.DisplayName == fullscreen) continue;
-                overlay.Field.UpdateLedges(geometry);
+                overlay.Scene.UpdateLedges(geometry);
                 overlay.Reveal(frameSurface);
                 var popup = geometry.Find(item => item.IsShellPopup && overlay.Contains(new Desktop.Point
                 {
@@ -281,86 +287,114 @@ namespace SnowDesk
             foreach (Overlay overlay in overlays)
             {
                 if (!overlay.IsVisible) continue;
-                if (overlay.Field.IsHoldingTree)
-                    overlay.Field.DragTree(cursor, elapsed, Desktop.PrimaryButtonDown());
-                overlay.Field.Advance(elapsed, settings, cursor);
+                SnowField snow = overlay.Snow;
+                if (snow != null && snow.IsHoldingTree)
+                    snow.DragTree(cursor, elapsed, Desktop.PrimaryButtonDown());
+                overlay.Scene.Advance(elapsed, settings, cursor);
                 overlay.RenderFrame(frameSurface);
                 overlay.UpdateTreeTarget();
             }
         }
 
-        private void ToggleSnow()
+        internal Settings Preferences { get { return settings; } }
+        internal bool IsRunning { get { return running; } }
+
+        internal void ShowDashboard()
+        {
+            if (dashboard == null) dashboard = new DeskWindow(this, icon);
+            dashboard.Show();
+            if (dashboard.WindowState == Forms.FormWindowState.Minimized)
+                dashboard.WindowState = Forms.FormWindowState.Normal;
+            dashboard.Activate();
+            dashboard.Sync();
+        }
+
+        private void SyncDashboard()
+        {
+            if (dashboard != null && dashboard.Visible) dashboard.Sync();
+        }
+
+        internal void SelectTheme(DesktopTheme theme)
+        {
+            if (theme == settings.Theme) return;
+            settings.Theme = theme;
+            PopupSurfaces.Clear();
+            RebuildDisplays();
+            SaveSettings();
+        }
+
+        internal void ToggleScene()
         {
             running = !running;
-            tray.Text = running ? "SnowDesk - Snow on" : "SnowDesk - Paused";
+            tray.Text = running ? "Starlit Desk - Efekt açık" : "Starlit Desk - Duraklatıldı";
             if (running) SetHooks();
             else StopHooks();
             RefreshDesktop(null, EventArgs.Empty);
+            SyncDashboard();
         }
 
         private Forms.ContextMenuStrip CreateMenu()
         {
             var menu = new Forms.ContextMenuStrip();
-            var toggle = new Forms.ToolStripMenuItem("Pause Snow", null, (sender, e) => ToggleSnow());
-            var wind = new Forms.ToolStripMenuItem("Wind", null, (sender, e) =>
+            var toggle = new Forms.ToolStripMenuItem("Duraklat", null, (sender, e) => ToggleScene());
+            var wind = new Forms.ToolStripMenuItem("Rüzgâr", null, (sender, e) =>
             {
                 settings.Wind = !settings.Wind;
                 SaveSettings();
             });
-            var sweep = new Forms.ToolStripMenuItem("Sweep with Cursor", null, (sender, e) =>
+            var sweep = new Forms.ToolStripMenuItem("İmleçle karı dağıt", null, (sender, e) =>
             {
                 settings.CursorSweep = !settings.CursorSweep;
                 SaveSettings();
             });
-            var ledges = new Forms.ToolStripMenuItem("Snow on Windows and Menus", null, (sender, e) =>
+            var ledges = new Forms.ToolStripMenuItem("Pencere ve menülerde kar", null, (sender, e) =>
+                SetWindowLedges(!settings.WindowLedges));
+            var startup = new Forms.ToolStripMenuItem("Windows ile başlat", null, (sender, e) => ToggleStartup());
+            var themes = new Forms.ToolStripMenuItem("Masaüstü teması") { Available = DesktopTheme.All.Count > 1 };
+            foreach (DesktopTheme theme in DesktopTheme.All)
             {
-                settings.WindowLedges = !settings.WindowLedges;
-                SaveSettings();
-                RefreshDesktop(null, EventArgs.Empty);
-            });
-            var startup = new Forms.ToolStripMenuItem("Start with Windows", null, (sender, e) => ToggleStartup());
-            var density = new Forms.ToolStripMenuItem("Snow Density");
-            AddOption(density, "Light", 0, () => settings.Density, value => settings.Density = value);
-            AddOption(density, "Medium", 1, () => settings.Density, value => settings.Density = value);
-            AddOption(density, "Heavy", 2, () => settings.Density, value => settings.Density = value);
-            var frameRate = new Forms.ToolStripMenuItem("Frame Rate");
-            AddOption(frameRate, "Eco (20 FPS)", 20, () => settings.Rate, SetFrameRate);
-            AddOption(frameRate, "Balanced (30 FPS)", 30, () => settings.Rate, SetFrameRate);
-            AddOption(frameRate, "Smooth (60 FPS)", 60, () => settings.Rate, SetFrameRate);
-            var decorations = new Forms.ToolStripMenuItem("Decorations");
-            AddEffect(decorations, "Christmas Trees", Effect.Trees);
-            AddEffect(decorations, "Santa's Sleigh", Effect.Sleigh);
-            AddEffect(decorations, "Walking Santa", Effect.Santa);
-            AddEffect(decorations, "Snowplow", Effect.Plow);
-            AddEffect(decorations, "Gondola", Effect.Gondola);
-            var icicles = new Forms.ToolStripMenuItem("Icicles", null, delegate
+                var option = new Forms.ToolStripMenuItem(theme.Name, null, (sender, e) => SelectTheme(theme));
+                themes.DropDownOpening += (sender, e) => option.Checked = settings.Theme == theme;
+                themes.DropDownItems.Add(option);
+            }
+            var density = new Forms.ToolStripMenuItem("Kar yoğunluğu");
+            AddOption(density, "Hafif", 0, () => settings.Density, value => settings.Density = value);
+            AddOption(density, "Orta", 1, () => settings.Density, value => settings.Density = value);
+            AddOption(density, "Yoğun", 2, () => settings.Density, value => settings.Density = value);
+            var frameRate = new Forms.ToolStripMenuItem("Kare hızı");
+            AddOption(frameRate, "Ekonomik (20 FPS)", 20, () => settings.Rate, SetFrameRate);
+            AddOption(frameRate, "Dengeli (30 FPS)", 30, () => settings.Rate, SetFrameRate);
+            AddOption(frameRate, "Akıcı (60 FPS)", 60, () => settings.Rate, SetFrameRate);
+            var decorations = new Forms.ToolStripMenuItem("Süslemeler");
+            AddEffect(decorations, "Yılbaşı ağaçları", Effect.Trees);
+            AddEffect(decorations, "Noel Baba'nın kızağı", Effect.Sleigh);
+            AddEffect(decorations, "Yürüyen Noel Baba", Effect.Santa);
+            AddEffect(decorations, "Kar küreme aracı", Effect.Plow);
+            AddEffect(decorations, "Teleferik", Effect.Gondola);
+            var icicles = new Forms.ToolStripMenuItem("Buz sarkıtları", null, delegate
             {
                 settings.Icicles = !settings.Icicles;
                 SaveSettings();
             });
             decorations.DropDownItems.Add(icicles);
             decorations.DropDownOpening += delegate { icicles.Checked = settings.Icicles; };
-            var manual = new Forms.ToolStripMenuItem("Trigger Effect");
-            AddAction(manual, "Drop a Christmas Tree", field => field.Trigger(Effect.Trees));
-            AddAction(manual, "Santa Takes a Walk", field => field.Trigger(Effect.Santa));
-            AddAction(manual, "Send the Sleigh", field => field.Trigger(Effect.Sleigh));
-            AddAction(manual, "Call the Snowplow", field => field.Trigger(Effect.Plow));
-            AddAction(manual, "Send the Gondola", field => field.Trigger(Effect.Gondola));
-            AddAction(manual, "Gust of Wind", field => field.Gust());
-            manual.DropDownItems.Add(new Forms.ToolStripSeparator());
-            manual.DropDownItems.Add(new Forms.ToolStripMenuItem("Clear Trees", null, delegate
-            {
-                foreach (Overlay overlay in overlays) overlay.Field.ClearTrees();
-            }));
+            var manual = new Forms.ToolStripMenuItem("Efekt başlat");
+            foreach (SnowAction action in SnowAction.All)
+                manual.DropDownItems.Add(new Forms.ToolStripMenuItem(action.Name, null,
+                    (sender, e) => RunSnowAction(action)));
             menu.Items.AddRange(new Forms.ToolStripItem[]
             {
-                toggle, new Forms.ToolStripSeparator(), density, frameRate, sweep, ledges, wind,
+                new Forms.ToolStripMenuItem("Kontrol panelini aç", null, (sender, e) => ShowDashboard()),
+                toggle, new Forms.ToolStripSeparator(), themes, density, frameRate, sweep, ledges, wind,
                 decorations, manual, startup,
-                new Forms.ToolStripSeparator(), new Forms.ToolStripMenuItem("Exit SnowDesk", null, (sender, e) => ExitThread())
+                new Forms.ToolStripSeparator(), new Forms.ToolStripMenuItem("Çıkış", null, (sender, e) => ExitThread())
             });
             menu.Opening += delegate
             {
-                toggle.Text = running ? "Pause Snow" : "Resume Snow";
+                bool winter = settings.Theme == DesktopTheme.Winter;
+                density.Available = sweep.Available = ledges.Available = wind.Available =
+                    decorations.Available = manual.Available = winter;
+                toggle.Text = running ? "Duraklat" : "Devam et";
                 wind.Checked = settings.Wind;
                 sweep.Checked = settings.CursorSweep;
                 ledges.Checked = settings.WindowLedges;
@@ -369,19 +403,30 @@ namespace SnowDesk
             return menu;
         }
 
-        private void AddAction(Forms.ToolStripMenuItem group, string title, Action<SnowField> action)
+        internal void RunSnowAction(SnowAction action)
         {
-            group.DropDownItems.Add(new Forms.ToolStripMenuItem(title, null, delegate
+            if (settings.Theme != DesktopTheme.Winter) return;
+            if (action == SnowAction.ClearTrees)
             {
-                if (!running) ToggleSnow();
-                Desktop.GetCursorPos(out cursor);
-                Overlay target = overlays.Find(item => item.IsVisible && item.Contains(cursor)) ??
-                    overlays.Find(item => item.IsVisible);
-                if (target != null) action(target.Field);
-            }));
+                foreach (Overlay overlay in overlays) action.Apply(overlay.Snow);
+                return;
+            }
+
+            if (!running) ToggleScene();
+            Desktop.GetCursorPos(out cursor);
+            Overlay target = overlays.Find(item => item.IsVisible && item.Contains(cursor)) ??
+                overlays.Find(item => item.IsVisible);
+            if (target != null) action.Apply(target.Snow);
         }
 
-        private void SetFrameRate(int value)
+        internal void SetWindowLedges(bool enabled)
+        {
+            settings.WindowLedges = enabled;
+            RefreshDesktop(null, EventArgs.Empty);
+            SaveSettings();
+        }
+
+        internal void SetFrameRate(int value)
         {
             settings.Rate = value;
             frameClock.SetRate(value);
@@ -410,33 +455,39 @@ namespace SnowDesk
             group.DropDownItems.Add(item);
         }
 
-        private void SaveSettings()
+        internal void SaveSettings()
         {
             try { settings.Save(); }
-            catch (IOException error) { ShowTrayError("Could not save settings", error); }
-            catch (UnauthorizedAccessException error) { ShowTrayError("Could not save settings", error); }
+            catch (IOException error) { ShowTrayError("Ayarlar kaydedilemedi", error); }
+            catch (UnauthorizedAccessException error) { ShowTrayError("Ayarlar kaydedilemedi", error); }
+            SyncDashboard();
         }
 
-        private static bool HasStartup()
+        internal static bool HasStartup()
         {
             using (RegistryKey key = Registry.CurrentUser.OpenSubKey(StartupKey))
-                return key != null && string.Equals(key.GetValue(StartupValue) as string,
-                    "\"" + Forms.Application.ExecutablePath + "\"", StringComparison.OrdinalIgnoreCase);
+            {
+                string value = key == null ? null : key.GetValue(StartupValue) as string;
+                string executable = "\"" + Forms.Application.ExecutablePath + "\"";
+                return string.Equals(value, executable, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(value, executable + " --background", StringComparison.OrdinalIgnoreCase);
+            }
         }
 
-        private void ToggleStartup()
+        internal void ToggleStartup()
         {
             try
             {
                 using (RegistryKey key = Registry.CurrentUser.CreateSubKey(StartupKey))
                 {
                     if (HasStartup()) key.DeleteValue(StartupValue, false);
-                    else key.SetValue(StartupValue, "\"" + Forms.Application.ExecutablePath + "\"");
+                    else key.SetValue(StartupValue, "\"" + Forms.Application.ExecutablePath + "\" --background");
                 }
             }
-            catch (IOException error) { ShowTrayError("Could not change startup settings", error); }
-            catch (UnauthorizedAccessException error) { ShowTrayError("Could not change startup settings", error); }
-            catch (System.Security.SecurityException error) { ShowTrayError("Could not change startup settings", error); }
+            catch (IOException error) { ShowTrayError("Başlangıç ayarı değiştirilemedi", error); }
+            catch (UnauthorizedAccessException error) { ShowTrayError("Başlangıç ayarı değiştirilemedi", error); }
+            catch (System.Security.SecurityException error) { ShowTrayError("Başlangıç ayarı değiştirilemedi", error); }
+            SyncDashboard();
         }
 
         private void ShowTrayError(string title, Exception error)
@@ -444,33 +495,5 @@ namespace SnowDesk
             tray.ShowBalloonTip(3500, title, error.Message, Forms.ToolTipIcon.Warning);
         }
 
-        [DllImport("user32.dll")]
-        private static extern bool DestroyIcon(IntPtr icon);
-
-        private static Drawing.Icon MakeIcon()
-        {
-            using (var bitmap = new Drawing.Bitmap(32, 32))
-            using (var canvas = Drawing.Graphics.FromImage(bitmap))
-            using (var outline = new Drawing.Pen(Drawing.Color.FromArgb(255, 39, 72, 107), 4.6f))
-            using (var snow = new Drawing.Pen(Drawing.Color.FromArgb(255, 210, 242, 255), 2.2f))
-            {
-                canvas.SmoothingMode = Drawing.Drawing2D.SmoothingMode.AntiAlias;
-                for (int pass = 0; pass < 2; pass++)
-                {
-                    Drawing.Pen pen = pass == 0 ? outline : snow;
-                    for (int spoke = 0; spoke < 6; spoke++)
-                    {
-                        double angle = spoke * Math.PI / 3;
-                        float x = (float)Math.Cos(angle), y = (float)Math.Sin(angle);
-                        canvas.DrawLine(pen, 16, 16, 16 + 12 * x, 16 + 12 * y);
-                        canvas.DrawLine(pen, 16 + 8 * x, 16 + 8 * y, 16 + 11 * x - 3 * y, 16 + 11 * y + 3 * x);
-                        canvas.DrawLine(pen, 16 + 8 * x, 16 + 8 * y, 16 + 11 * x + 3 * y, 16 + 11 * y - 3 * x);
-                    }
-                }
-                IntPtr handle = bitmap.GetHicon();
-                try { return (Drawing.Icon)Drawing.Icon.FromHandle(handle).Clone(); }
-                finally { DestroyIcon(handle); }
-            }
-        }
     }
 }

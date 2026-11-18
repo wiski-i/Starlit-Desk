@@ -1,42 +1,63 @@
-# SnowDesk for Windows
+<div align="center">
+  <img src="branding/StarlitDesk.png" alt="Starlit Desk logo" width="92" height="92">
+  <h1>Starlit Desk</h1>
+  <p><strong>Seasonal effects for your Windows desktop. Start with snow that settles on your windows.</strong></p>
+  <p><strong>Language:</strong> <a href="README.md">EN</a> | <a href="README.tr.md">TR</a> · <a href="#quick-start">Quick start</a> · <a href="#build-from-source">Build</a></p>
+  <p>
+    <img src="https://img.shields.io/badge/Windows-10%20%2F%2011-69304e?style=flat-square" alt="Windows 10 or 11">
+    <img src="https://img.shields.io/badge/.NET%20Framework-4.8%2B-9c607e?style=flat-square" alt=".NET Framework 4.8 or later">
+    <img src="https://img.shields.io/badge/Desktop%20theme-Winter-e7a0b9?style=flat-square" alt="Winter desktop theme">
+  </p>
+</div>
 
-SnowDesk adds offline snowfall to your desktop. Snow builds up on visible window edges and at the bottom of each screen.
+## Windows interface
 
-## Run
+<p align="center"><img src="docs/images/windows.png" alt="Starlit Desk control panel in Turkish with the Winter theme selected, snowfall controls and an effect launcher" width="800"></p>
 
-Open `build\SnowDesk.exe` on Windows 10 or 11 with .NET Framework 4.8 or later. Find the snowflake in the system tray, including under the hidden-icons arrow. Exit the previous version before starting a new release.
+The Turkish control panel uses the burgundy and rose palette of AI Usage Hub. The theme selector shows the bundled desktop effects. **Kış** (Winter) is the first theme.
 
-- Left-click the snowflake to pause or resume. Sweep the pointer across settled snow to scatter it.
-- Right-click for density, wind, decorations, frame rate, startup, and exit.
-- Small icicles grow under visible window rims and break when they get too long or their window moves abruptly. Toggle them from **Decorations > Icicles**.
-- Santa leaves a heel and toe impression where each boot lands. Deep snow kicks up a little powder. A landed tree compresses the snow beneath its trunk, and new snow slowly buries its base.
-- The plow slows down in deep snow. Light powder scatters to either side and excess snow tumbles off a full blade. Snow pours off window edges, and the plow carries it out of view at the right edge of the screen. Wind gradually moves loose surface snow along the ledges.
-- Open **Trigger Effect** to drop a tree, start Santa's walk or sleigh, send the plow or gondola, or trigger a gust of wind.
-- Click and drag a tree directly. Release it to drop or toss it. A quick cursor sweep pushes both settled snow and nearby falling flakes.
-- **Snow on Windows and Menus** controls accumulation on window rims, the taskbar, native popup menus, Start, and the hidden-icons flyout when Windows exposes the panel bounds.
-- Choose **Eco (20 FPS)**, **Balanced (30 FPS)**, or **Smooth (60 FPS)** to set the frame-rate cap. Balanced is the default.
-- Enable **Start with Windows** from the tray if you want automatic startup for your account. Turn it off before moving the executable to another folder.
+## Quick start
 
-Each flake adds 50% more settled snow at the same snowfall density, with a 50% higher depth limit. The snow drifts follow the window frame and its estimated corner radius. Dragging a window dislodges part of its snow in the direction of motion. Resizing it preserves the snow above the supported edge. Dislodged snow can settle on another window or at the bottom of the screen.
+1. Build the app on Windows 10 or 11 with .NET Framework 4.8 or later, then open **StarlitDesk.exe** in the `build` folder. Close older SnowDesk instances before launching.
+2. Use the control panel to choose a desktop theme, change the density and frame rate, or trigger an effect. Changes are saved locally.
+3. Click the star beside the clock to reopen the panel. Windows may place the star under **^**. Right-click for quick settings, pause or **Çıkış** (Quit).
+4. Enable **Windows ile başlat** to start in the tray when you sign in. Turn it off before moving the executable.
 
-SnowDesk reads window geometry through Windows APIs. It creates no network connections and captures no screen content. Preferences are stored in `%LOCALAPPDATA%\SnowDeskWindows\settings.ini`. Settled snow melts slowly at its base while the remaining layer settles onto the frame. Thin cover lasts longer. Deep piles melt faster to keep the desktop readable. Melting stops when you pause.
+## Features
 
-Unchanged snow contours reuse a small local drawing cache. One reusable drawing surface feeds all active monitors. Pausing stops the frame timer, releases that surface, and unregisters window tracking until you resume.
+| Area | Behavior |
+| --- | --- |
+| **Winter** | Snow settles on window edges and at the bottom of each screen. Moving windows can dislodge the snow. |
+| **Interaction** | Sweep the pointer to scatter flakes and settled snow. Drag and release a tree to drop or toss it. |
+| **Decorations** | Toggle icicles, trees, Santa, the sleigh, the snowplow and the gondola. Launch them on demand, send a gust or clear the trees. |
+| **Performance** | Choose 20, 30 or 60 FPS. Pausing stops the frame timer and releases the shared render surface. |
+| **Tray** | Close the panel to keep the current effect running. Choose **Çıkış** to exit. |
+| **Privacy** | The app runs offline and places effects using window geometry from Windows APIs. |
 
-## Build
+Starlit Desk keeps existing preferences in `%LOCALAPPDATA%\SnowDeskWindows\settings.ini`.
 
-From this directory, run the script with PowerShell. It uses the 64-bit .NET Framework C# compiler included with Windows and writes `build\SnowDesk.exe`.
+## Build from source
 
 ```powershell
+git clone https://github.com/wiski-i/Starlit-Desk.git
+cd Starlit-Desk
 .\build.ps1
+.\build\StarlitDesk.exe
 ```
 
-## Artwork
+The build uses the 64-bit C# compiler included with .NET Framework on Windows. The logo is embedded in the executable for the panel, title bar and notification area.
 
-DecorationArt draws the models with GDI+ paths, strokes, and jointed movement. The tree's silhouette defines its mouse target. Snowflakes and the rest of the overlay pass clicks to the desktop.
+## Adding a desktop theme
 
-## Reference package
+Create a `DesktopScene` implementation and give it a catalog entry in [src/DesktopTheme.cs](src/DesktopTheme.cs). Each entry uses a stable ID, a display name, a description and a factory that creates one scene per monitor. Include the entry in `DesktopTheme.All` to show it in the selector. Keep the ID stable to preserve saved selections. Missing or older theme selections resolve to Winter.
 
-The behavior reference was the DADA Creative Snowdesk 1.3 disk image and its bundled guide. The Windows implementation has its own snow simulation, Windows integration, and artwork.
+| Path | Purpose |
+| --- | --- |
+| [src/DeskWindow.cs](src/DeskWindow.cs) | Control panel and settings |
+| [src/DeskStyle.cs](src/DeskStyle.cs) | Burgundy palette and themed controls |
+| [src/SnowField.cs](src/SnowField.cs) | Winter scene and snow simulation |
+| [branding/](branding/) | PNG logo and multi-size Windows icon |
 
-REA 6.7.0 recorded the disk image and identified the extracted executable as universal Mach-O. DMG evidence is `ev_313e0e7a51347a4aa6b901f8d77369ce43333d49f28abba99e3952741a013bae`. Executable evidence is `ev_62d7f00a7d104dfc94c2aecee17c865be9a99d9ce5f6fb563e6489293e3b4522`. The bundled guide supplied the feature list. The analysis was static, with macOS runtime behavior outside its coverage.
+## Credits
+
+The Windows snowfall implementation started in this repository as SnowDesk for Windows. DADA Creative's *Snowdesk 1.3* and its bundled guide were the original behavior reference.

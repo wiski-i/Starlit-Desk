@@ -1,6 +1,6 @@
 param(
     [ValidatePattern('^[A-Za-z0-9_.-]+\.exe$')]
-    [string]$OutputName = 'SnowDesk.exe'
+    [string]$OutputName = 'StarlitDesk.exe'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,6 +24,9 @@ $arguments = @(
     '/target:winexe'
     '/optimize+'
     '/warnaserror+'
+    '/codepage:65001'
+    "/win32icon:$PSScriptRoot\branding\StarlitDesk.ico"
+    "/resource:$PSScriptRoot\branding\StarlitDesk.png,StarlitDesk.Logo"
     "/win32manifest:$PSScriptRoot\app.manifest"
     "/out:$output\$OutputName"
 )

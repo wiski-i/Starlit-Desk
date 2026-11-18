@@ -9,7 +9,7 @@ using Forms = System.Windows.Forms;
 
 namespace SnowDesk
 {
-    internal sealed class SnowField : IDisposable
+    internal sealed class SnowField : DesktopScene
     {
         private const int MaxFlakes = 600;
         private const int MaxLedges = 32;
@@ -82,7 +82,9 @@ namespace SnowDesk
             ledges.Add(floor);
         }
 
-        internal void UpdateLedges(List<Desktop.WindowBounds> windows)
+        public bool UsesWindowGeometry(Settings settings) { return settings.WindowLedges; }
+
+        public void UpdateLedges(List<Desktop.WindowBounds> windows)
         {
             icicles.UpdateWindows(windows);
             long now = Stopwatch.GetTimestamp();
@@ -257,13 +259,13 @@ namespace SnowDesk
             gustDirection = random.Next(2) == 0 ? -1 : 1;
         }
 
-        internal void ResetPointer()
+        public void ResetPointer()
         {
             hasPointer = false;
             effects.DragTree(0, 0, 0, false);
         }
 
-        internal void Advance(double seconds, Settings settings, Desktop.Point pointer)
+        public void Advance(double seconds, Settings settings, Desktop.Point pointer)
         {
             if (seconds <= 0) return;
             elapsed += seconds;
@@ -521,7 +523,7 @@ namespace SnowDesk
             }
         }
 
-        internal void Draw(Canvas drawing)
+        public void Draw(Canvas drawing)
         {
             foreach (SnowLedge ledge in ledges) ledge.Draw(drawing, PileEdge);
             icicles.Draw(drawing);

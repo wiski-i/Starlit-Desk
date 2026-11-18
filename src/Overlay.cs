@@ -16,15 +16,16 @@ namespace SnowDesk
         private bool wasOnDesktop;
         private TreeTarget treeTarget;
 
-        internal SnowField Field { get; private set; }
+        internal DesktopScene Scene { get; private set; }
+        internal SnowField Snow { get { return Scene as SnowField; } }
         internal string DisplayName { get { return screen.DeviceName; } }
         internal bool IsVisible { get; private set; }
         internal Rectangle Bounds { get { return screen.Bounds; } }
 
-        internal Overlay(Forms.Screen display)
+        internal Overlay(Forms.Screen display, DesktopTheme theme)
         {
             screen = display;
-            Field = new SnowField(display);
+            Scene = theme.CreateScene(display);
         }
 
         internal void Reveal(FrameSurface frame)
@@ -42,7 +43,7 @@ namespace SnowDesk
             {
                 const uint Popup = 0x80000000;
                 window = CreateWindowEx(Layered | ClickThrough | ToolWindow | NoActivate | Topmost,
-                    "Static", "SnowDesk Snow Layer", Popup, bounds.X, bounds.Y, bounds.Width, bounds.Height,
+                    "Static", "Starlit Desk Overlay", Popup, bounds.X, bounds.Y, bounds.Width, bounds.Height,
                     IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
                 if (window == IntPtr.Zero) throw new Win32Exception();
                 RenderFrame(frame);
@@ -90,14 +91,14 @@ namespace SnowDesk
         {
             System.Windows.Rect grip;
             double visibleBottom;
-            if (!Field.TryTreeBounds(out grip, out visibleBottom))
+            if (Snow == null || !Snow.TryTreeBounds(out grip, out visibleBottom))
             {
                 if (treeTarget != null) treeTarget.Place(Rectangle.Empty);
                 return;
             }
             if (treeTarget == null)
             {
-                treeTarget = new TreeTarget(window, Field.GrabTree);
+                treeTarget = new TreeTarget(window, Snow.GrabTree);
             }
             var bounds = new Rectangle((int)Math.Round(grip.X), (int)Math.Round(grip.Y),
                 (int)Math.Round(grip.Width), (int)Math.Round(grip.Height));
@@ -108,7 +109,7 @@ namespace SnowDesk
         {
             Rectangle bounds = screen.Bounds;
             frame.Canvas.BeginFrame(bounds.Width, bounds.Height);
-            Field.Draw(frame.Canvas);
+            Scene.Draw(frame.Canvas);
             frame.Canvas.Flush();
             var destination = new Desktop.Point { X = bounds.X, Y = bounds.Y };
             var extent = new Desktop.Point { X = bounds.Width, Y = bounds.Height };

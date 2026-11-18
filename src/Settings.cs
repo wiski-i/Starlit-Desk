@@ -16,9 +16,11 @@ namespace SnowDesk
 
     internal sealed class Settings
     {
-        private static readonly string FilePath = Path.Combine(
+        private static readonly string DefaultPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SnowDeskWindows", "settings.ini");
+        private readonly string filePath;
 
+        internal DesktopTheme Theme = DesktopTheme.Winter;
         internal int Density = 1;
         internal int Rate = 30;
         internal bool Wind = true;
@@ -27,23 +29,33 @@ namespace SnowDesk
         internal bool Icicles = true;
         internal Effect Effects = Effect.Trees | Effect.Sleigh | Effect.Santa | Effect.Plow;
 
+        private Settings(string filePath)
+        {
+            this.filePath = filePath;
+        }
+
         internal bool Has(Effect effect)
         {
             return (Effects & effect) != 0;
         }
 
-        internal static Settings Load()
+        internal static Settings Load(string path = null)
         {
-            var settings = new Settings();
+            var settings = new Settings(path ?? DefaultPath);
             try
             {
-                foreach (string line in File.ReadLines(FilePath))
+                foreach (string line in File.ReadLines(settings.filePath))
                 {
                     string[] parts = line.Split('=');
-                    int value;
-                    if (parts.Length != 2 || !int.TryParse(parts[1], NumberStyles.Integer,
-                        CultureInfo.InvariantCulture, out value)) continue;
+                    if (parts.Length != 2) continue;
                     string key = parts[0];
+                    if (key == "theme")
+                    {
+                        settings.Theme = DesktopTheme.FromId(parts[1]);
+                        continue;
+                    }
+                    int value;
+                    if (!int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out value)) continue;
                     if (key == "density" && value >= 0 && value <= 2) settings.Density = value;
                     if (key == "fps" && (value == 20 || value == 30 || value == 60)) settings.Rate = value;
                     if (key == "wind") settings.Wind = value != 0;
@@ -60,13 +72,14 @@ namespace SnowDesk
 
         internal void Save()
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(FilePath));
-            string temp = FilePath + ".tmp";
+            Directory.CreateDirectory(Path.GetDirectoryName(filePath));
+            string temp = filePath + ".tmp";
             File.WriteAllText(temp, string.Format(CultureInfo.InvariantCulture,
-                "density={0}\nfps={1}\nwind={2}\neffects={3}\nsweep={4}\nledges={5}\nicicles={6}\n",
-                Density, Rate, Wind ? 1 : 0, (int)Effects, CursorSweep ? 1 : 0, WindowLedges ? 1 : 0, Icicles ? 1 : 0));
-            if (File.Exists(FilePath)) File.Replace(temp, FilePath, null);
-            else File.Move(temp, FilePath);
+                "density={0}\nfps={1}\nwind={2}\neffects={3}\nsweep={4}\nledges={5}\nicicles={6}\ntheme={7}\n",
+                Density, Rate, Wind ? 1 : 0, (int)Effects, CursorSweep ? 1 : 0, WindowLedges ? 1 : 0,
+                Icicles ? 1 : 0, Theme.Id));
+            if (File.Exists(filePath)) File.Replace(temp, filePath, null);
+            else File.Move(temp, filePath);
         }
     }
 }
