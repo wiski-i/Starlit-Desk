@@ -17,7 +17,7 @@ namespace SnowDesk
         private Stage bather = Stage.Away, pump = Stage.Away;
         private double batherX, batherDirection = 1, batherStep, batherReady;
         private bool batherInvited;
-        private double pumpX, pumpDirection = 1, pumpStop, hose, overflow;
+        private double pumpX, pumpDirection = 1, pumpStop, hose, overflow, tankFill, pumpedFrom;
         private bool runnerActive;
         private double runnerX, runnerDirection = 1, runnerStep, nextRunner = 14;
         private int frogPad = 1, frogTarget = 1;
@@ -43,6 +43,8 @@ namespace SnowDesk
             pumpDirection = scene.Main.X < scene.Width * 0.5 ? 1 : -1;
             pumpX = pumpDirection > 0 ? -50 * S : scene.Width + 50 * S;
             pump = Stage.Arriving;
+            tankFill = 0.08;
+            pumpedFrom = -1;
         }
 
         internal void SendRunner()
@@ -130,7 +132,8 @@ namespace SnowDesk
                 if (enabled && overflow > 14) CallPump();
                 return;
             }
-            pumpStop = pool.X - pumpDirection * (pool.Half + 30 * S);
+            // The stop is fixed on arrival; the truck stays parked while the puddle shrinks.
+            if (pump == Stage.Arriving) pumpStop = pool.X - pumpDirection * (pool.Half + 46 * S);
             if (pump == Stage.Arriving)
             {
                 pumpX += pumpDirection * 95 * S * dt;
@@ -144,9 +147,13 @@ namespace SnowDesk
             {
                 pumpX = pumpStop;
                 hose = Math.Min(1, hose + dt * 1.5);
-                if (hose >= 1) pool.Drain = 0.075 * scene.Pace;
-                if (hose >= 1 && scene.Random.NextDouble() < dt * 30)
-                    scene.Spray(pumpX - pumpDirection * 27 * S, scene.Ground - 22 * S, -pumpDirection * 120, -150);
+                if (hose >= 1)
+                {
+                    // The truck stores what it drains: the tank gauge rises as the puddle shrinks.
+                    if (pumpedFrom < 0) pumpedFrom = Math.Max(0.05, pool.Volume);
+                    pool.Drain = 0.075 * scene.Pace;
+                    tankFill = Math.Max(tankFill, 0.08 + 0.86 * Math.Min(1, 1 - pool.Volume / pumpedFrom));
+                }
                 if (pool.Volume < 0.02)
                 {
                     hose = Math.Max(0, hose - dt * 3);
@@ -254,8 +261,9 @@ namespace SnowDesk
             {
                 bool facingLeft = pumpDirection < 0;
                 bool working = pump == Stage.Busy;
+                double fill = tankFill, slosh = pump == Stage.Busy ? 0 : Math.Sin(clock * 3) * 0.6;
                 if (hose > 0) DrawHose(canvas);
-                canvas.DrawArt(pumpX, scene.Ground, S, facingLeft, g => SummerArt.Pump(g, clock, working));
+                canvas.DrawArt(pumpX, scene.Ground, S, facingLeft, g => SummerArt.Pump(g, clock, working, fill, slosh));
             }
             if (bather != Stage.Away)
             {
@@ -276,18 +284,23 @@ namespace SnowDesk
         private void DrawHose(Canvas canvas)
         {
             SummerScene.Pool pool = scene.Main;
-            float startX = (float)(pumpX + pumpDirection * 16 * S), startY = (float)(scene.Ground - 20 * S);
+            float startX = (float)(pumpX + pumpDirection * 37 * S), startY = (float)(scene.Ground - 19.5 * S);
             float endX = (float)(pool.X - pumpDirection * pool.Half * 0.35);
             float endY = (float)(scene.Ground - pool.Depth(S) * 0.2);
             endX = startX + (endX - startX) * (float)hose;
             endY = startY + (endY - startY) * (float)hose;
             float sag = (float)(14 * S);
+            bool flowing = pump == Stage.Busy && pool.Drain > 0;
+            float offset = (float)(clock * 9);
             canvas.DrawArt(0, 0, 1, false, g =>
             {
                 g.DrawBezier(SummerArt.Hose, startX, startY, startX + (endX - startX) * 0.3f, startY - sag,
                     endX - (endX - startX) * 0.2f, endY - sag, endX, endY);
-                float outX = (float)(pumpX - pumpDirection * 27 * S), outY = (float)(scene.Ground - 22 * S);
-                g.DrawLine(SummerArt.Hose, (float)(pumpX - pumpDirection * 18 * S), outY + 4, outX, outY);
+                if (!flowing) return;
+                // Light dashes run from the puddle end up to the truck while it pumps.
+                SummerArt.HoseFlow.DashOffset = offset;
+                g.DrawBezier(SummerArt.HoseFlow, endX, endY, endX - (endX - startX) * 0.2f, endY - sag,
+                    startX + (endX - startX) * 0.3f, startY - sag, startX, startY);
             });
         }
     }

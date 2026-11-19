@@ -17,7 +17,9 @@ namespace SnowDesk
         private readonly DeskSelect themes, density, rate, rain, effects;
         private readonly Label intro, status, themeDetail;
         private readonly Button pause;
-        private readonly Control winterCard, summerCard;
+        private readonly Control winterCard, summerCard, screenCard;
+        private readonly FlowLayoutPanel screenList;
+        private string screenLayout;
         private DesktopTheme actionTheme;
         private readonly Image logo;
         private bool syncing;
@@ -35,7 +37,7 @@ namespace SnowDesk
             Font = new Font("Segoe UI", 10f);
             BackColor = DeskStyle.Background;
             ForeColor = DeskStyle.Text;
-            ClientSize = new Size(884, 708);
+            ClientSize = new Size(884, Screen.AllScreens.Length > 1 ? 846 : 708);
             MinimumSize = new Size(770, 465);
             FormClosing += KeepInTray;
 
@@ -159,6 +161,16 @@ namespace SnowDesk
             AddDecoration(decorations, "Teleferik", Effect.Gondola);
             AddCheck(decorations, "Buz sarkıtları", () => settings.Icicles, value => settings.Icicles = value);
 
+            screenCard = DeskStyle.Card("Ekranlar", 124);
+            body.Controls.Add(screenCard);
+            var screenBody = (TableLayoutPanel)screenCard.Controls[0];
+            screenBody.Controls.Add(DeskStyle.Copy("Efektin görüneceği ekranları seç."));
+            screenList = new FlowLayoutPanel
+            {
+                AutoSize = true, Dock = DockStyle.Top, BackColor = DeskStyle.Surface, Margin = new Padding(0, 4, 0, 0)
+            };
+            screenBody.Controls.Add(screenList);
+
             var actions = DeskStyle.Card("Efekt başlat", 108);
             body.Controls.Add(actions);
             var actionBody = (TableLayoutPanel)actions.Controls[0];
@@ -207,8 +219,36 @@ namespace SnowDesk
                     effects.SelectedIndex = 0;
                 }
                 foreach (Action update in updateChecks) update();
+                SyncScreens();
             }
             finally { syncing = false; }
+        }
+
+        /// <summary>Rebuilds the display switches when monitors change and ticks the ones showing the effect.</summary>
+        private void SyncScreens()
+        {
+            Screen[] screens = Screen.AllScreens;
+            screenCard.Visible = screens.Length > 1;
+            string layout = string.Join("|", Array.ConvertAll(screens, item => item.DeviceName + item.Bounds));
+            if (layout != screenLayout)
+            {
+                screenLayout = layout;
+                while (screenList.Controls.Count != 0) screenList.Controls[0].Dispose();
+                foreach (Screen screen in screens)
+                {
+                    string device = screen.DeviceName;
+                    CheckBox check = DeskStyle.Toggle(Program.ScreenLabel(screen));
+                    check.Tag = device;
+                    check.Margin = new Padding(0, 1, 18, 1);
+                    check.CheckedChanged += delegate
+                    {
+                        if (!syncing) app.SetScreenShown(device, check.Checked);
+                    };
+                    screenList.Controls.Add(check);
+                }
+            }
+            foreach (Control control in screenList.Controls)
+                ((CheckBox)control).Checked = settings.ShowsOn((string)control.Tag);
         }
 
         private void UpdatePreview()
@@ -223,12 +263,14 @@ namespace SnowDesk
             base.OnActivated(e);
             foreground = true;
             UpdatePreview();
+            app.DashboardChanged();
         }
 
         protected override void OnDeactivate(EventArgs e)
         {
             foreground = false;
             UpdatePreview();
+            app.DashboardChanged();
             base.OnDeactivate(e);
         }
 
@@ -236,12 +278,20 @@ namespace SnowDesk
         {
             base.OnVisibleChanged(e);
             UpdatePreview();
+            app.DashboardChanged();
         }
 
         protected override void OnResize(EventArgs e)
         {
             base.OnResize(e);
             UpdatePreview();
+            app.DashboardChanged();
+        }
+
+        protected override void OnMove(EventArgs e)
+        {
+            base.OnMove(e);
+            app.DashboardChanged();
         }
 
         protected override void WndProc(ref Message message)

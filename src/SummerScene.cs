@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using Rect = System.Windows.Rect;
@@ -9,40 +10,36 @@ using Forms = System.Windows.Forms;
 namespace SnowDesk
 {
     /// <summary>
-    /// Summer shower scene: warm rain, water films on window tops, puddles on the taskbar edge and a
+    /// Summer shower scene: warm rain, water that collects on window tops (<see cref="WaterLedge"/>), runs off
+    /// their ends and is thrown off when a window is dragged or shaken, puddles on the taskbar edge and a
     /// rain/sun cycle that drives the characters in <see cref="SummerCast"/>.
     /// </summary>
     internal sealed class SummerScene : DesktopScene
     {
-        private const int MaxDrops = 520, MaxSparks = 320, MaxRipples = 90, MaxFilms = 32, Cell = 8;
-        private static readonly Pen[] DropPens =
-        {
-            Line(70, 186, 214, 240, 1f), Line(110, 204, 228, 250, 1.1f), Line(160, 226, 240, 255, 1.3f)
-        };
-        private static readonly Pen[] RipplePens =
-        {
-            Line(50, 226, 244, 255, 1f), Line(100, 226, 244, 255, 1f), Line(160, 226, 244, 255, 1.1f)
-        };
-        private static readonly Brush SparkBrush = SnowField.Brush(200, 214, 236, 255);
-        private static readonly Brush FilmBrush = SnowField.Brush(118, 118, 186, 232);
-        private static readonly Pen FilmGlint = Line(180, 230, 246, 255, 1f);
-        private static readonly Pen WaterEdge = Line(170, 222, 242, 255, 1.1f);
+        private const int MaxDrops = 520, MaxBeads = 420, MaxRipples = 90, MaxLedges = 32;
+        private const double Gravity = 520;
+        private static readonly Pen[] TailPens = { Line(22, 205, 225, 245, 1f), Line(38, 210, 230, 248, 1f), Line(56, 220, 236, 252, 1.1f) };
+        private static readonly Pen[] HeadPens = { Line(60, 214, 232, 250, 1f), Line(95, 222, 238, 252, 1.1f), Line(140, 234, 245, 255, 1.25f) };
+        private static readonly Pen[] RipplePens = { Line(45, 226, 244, 255, 1f), Line(90, 226, 244, 255, 1f), Line(150, 232, 246, 255, 1.1f) };
+        private static readonly Brush MistBrush = SnowField.Brush(170, 220, 238, 255);
+        private static readonly Brush BeadBrush = SnowField.Brush(205, 168, 214, 244);
+        private static readonly Brush BeadShine = SnowField.Brush(230, 250, 253, 255);
 
         private readonly Random random = new Random(Guid.NewGuid().GetHashCode());
         private readonly Rect screen;
         private readonly Drop[] drops = new Drop[MaxDrops];
-        private readonly List<Spark> sparks = new List<Spark>(MaxSparks);
+        private readonly List<Bead> beads = new List<Bead>(MaxBeads);
         private readonly List<Ripple> ripples = new List<Ripple>(MaxRipples);
-        private readonly Dictionary<IntPtr, Film> films = new Dictionary<IntPtr, Film>();
-        private readonly List<Film> visibleFilms = new List<Film>(MaxFilms);
+        private readonly Dictionary<IntPtr, WaterLedge> ledges = new Dictionary<IntPtr, WaterLedge>();
+        private readonly List<WaterLedge> visibleLedges = new List<WaterLedge>(MaxLedges);
         private readonly HashSet<IntPtr> seen = new HashSet<IntPtr>();
         private readonly List<IntPtr> gone = new List<IntPtr>();
         private readonly List<Pool> pools = new List<Pool>(3);
         private readonly List<RectangleF> blockers = new List<RectangleF>();
-        private bool filmsOn = true;
         private readonly SummerCast cast;
         private int dropCount;
-        private bool seeded, raining = true;
+        private long lastGeometry;
+        private bool seeded, raining = true, ledgesOn = true;
         private double phaseLeft, intensity = 1, elapsed, sunTime, rainbow, sunGlow, gust, gustDirection = 1;
 
         private struct Drop
@@ -51,10 +48,11 @@ namespace SnowDesk
             internal int Layer;
         }
 
-        private struct Spark
+        /// <summary>A flying drop of water. Beads with mass land on ledges and puddles; mist is only spray.</summary>
+        private struct Bead
         {
-            internal double X, Y, VX, VY, Age, Life;
-            internal bool Drip;
+            internal double X, Y, VX, VY, Age, Life, Mass;
+            internal IntPtr Source;
         }
 
         private struct Ripple
@@ -62,28 +60,32 @@ namespace SnowDesk
             internal double X, Y, Age, Size;
         }
 
-        private sealed class Film
-        {
-            internal double Left, Top, Width, Level;
-            internal bool[] Visible;
-            internal double Height { get { return 1.2 + Level * 5; } }
-        }
-
         /// <summary>A puddle that grows from its centre along the ground line.</summary>
         internal sealed class Pool
         {
-            internal double X, Reach, Volume, Drain;
+            internal double X, Reach, Volume, Drain, Seed;
             internal bool Pond;
             internal double Half { get { return Reach * Math.Sqrt(Volume); } }
             internal double Depth(double scale) { return (1.5 + 11 * Volume) * scale; }
+
+            /// <summary>Flattened lens profile: 1 at the middle, 0 at the rim.</summary>
+            internal static double Profile(double t)
+            {
+                double edge = 1 - t * t * t * t;
+                return edge <= 0 ? 0 : Math.Sqrt(edge);
+            }
 
             /// <summary>Water surface height at x, or NaN outside the puddle.</summary>
             internal double SurfaceAt(double x, double ground, double scale)
             {
                 double half = Half;
                 if (half < 2 || Math.Abs(x - X) >= half) return double.NaN;
-                double t = (x - X) / half;
-                return ground - Depth(scale) * Math.Sqrt(1 - t * t);
+                return ground - Depth(scale) * Profile((x - X) / half);
+            }
+
+            internal void Absorb(double mass)
+            {
+                Volume = Math.Min(1, Volume + mass * 2.2 / (Reach * 100));
             }
         }
 
@@ -103,12 +105,12 @@ namespace SnowDesk
             Pace = pace;
             phaseLeft = 50 + random.NextDouble() * 20;
             double main = Width * (0.34 + random.NextDouble() * 0.3);
-            pools.Add(new Pool { X = main, Reach = 92 * Scale, Volume = pace > 1 ? 0.62 : 0.3 });
+            pools.Add(new Pool { X = main, Reach = 96 * Scale, Volume = pace > 1 ? 0.62 : 0.3, Seed = random.NextDouble() * 9 });
             double pond = main + (random.Next(2) == 0 ? -1 : 1) * Math.Max(Width * 0.24, 190 * Scale);
             if (pond < 70 * Scale || pond > Width - 70 * Scale) pond = main + (main > Width * 0.5 ? -1 : 1) * Width * 0.24;
-            pools.Add(new Pool { X = pond, Reach = 62 * Scale, Volume = pace > 1 ? 0.6 : 0.34, Pond = true });
+            pools.Add(new Pool { X = pond, Reach = 64 * Scale, Volume = pace > 1 ? 0.6 : 0.34, Pond = true, Seed = random.NextDouble() * 9 });
             if (Width > 1500 * Scale)
-                pools.Add(new Pool { X = Width * (main > Width * 0.5 ? 0.12 : 0.88), Reach = 44 * Scale, Volume = 0.2 });
+                pools.Add(new Pool { X = Width * (main > Width * 0.5 ? 0.12 : 0.88), Reach = 46 * Scale, Volume = 0.2, Seed = 3 });
             cast = new SummerCast(this);
         }
 
@@ -129,6 +131,7 @@ namespace SnowDesk
         {
             return settings.WindowLedges || settings.Has(SummerEffect.Rainbow);
         }
+
         public void ResetPointer() { }
 
         /// <summary>Starts a shower or sunshine right away (panel and tray actions).</summary>
@@ -157,63 +160,113 @@ namespace SnowDesk
 
         public void UpdateLedges(List<Desktop.WindowBounds> windows)
         {
-            visibleFilms.Clear();
+            long now = Stopwatch.GetTimestamp();
+            double scanTime = Math.Max(0.016, Math.Min(0.1, (double)(now - lastGeometry) / Stopwatch.Frequency));
+            lastGeometry = now;
+            visibleLedges.Clear();
             seen.Clear();
             blockers.Clear();
             foreach (Desktop.WindowBounds window in windows)
                 blockers.Add(new RectangleF((float)(window.Bounds.X - screen.Left), (float)(window.Bounds.Y - screen.Top),
                     (float)window.Bounds.Width, (float)window.Bounds.Height));
-            for (int i = 0; i < windows.Count && visibleFilms.Count < MaxFilms; i++)
+            for (int i = 0; i < windows.Count && visibleLedges.Count < MaxLedges; i++)
             {
                 Rect bounds = windows[i].Bounds;
                 double left = Math.Max(screen.Left, bounds.Left), right = Math.Min(screen.Right, bounds.Right);
                 if (bounds.Top <= screen.Top + 2 || bounds.Top - screen.Top >= Ground - 12 || right - left < 32) continue;
-                IntPtr handle = windows[i].Handle;
-                double x = left - screen.Left, y = bounds.Top - screen.Top, width = right - left;
-                Film film;
-                if (!films.TryGetValue(handle, out film))
-                {
-                    film = new Film();
-                    films.Add(handle, film);
-                }
-                else if (film.Left != x || film.Top != y || film.Width != width)
-                {
-                    Spill(film);
-                    film.Level *= 0.35;
-                }
-                film.Left = x;
-                film.Top = y;
-                film.Width = width;
-                int cells = (int)Math.Ceiling(width / Cell);
-                if (film.Visible == null || film.Visible.Length != cells) film.Visible = new bool[cells];
+                WaterLedge ledge = Locate(windows[i].Handle, bounds, left - screen.Left, bounds.Top - screen.Top,
+                    right - left, scanTime);
                 bool any = false;
-                for (int cell = 0; cell < cells; cell++)
+                for (int cell = 0; cell < ledge.Visible.Length; cell++)
                 {
-                    double probe = screen.Left + x + Math.Min(width - 1, cell * Cell + Cell * 0.5);
+                    double probe = screen.Left + ledge.CellCenter(cell);
                     bool visible = true;
                     for (int front = 0; front < i && visible; front++)
                         visible = !windows[front].Bounds.Contains(probe, bounds.Top - 1);
-                    film.Visible[cell] = visible;
+                    ledge.Visible[cell] = visible;
                     any |= visible;
                 }
-                seen.Add(handle);
-                if (any) visibleFilms.Add(film);
+                seen.Add(ledge.Handle);
+                if (any) visibleLedges.Add(ledge);
             }
             gone.Clear();
-            foreach (var pair in films)
+            foreach (var pair in ledges)
                 if (!seen.Contains(pair.Key)) gone.Add(pair.Key);
             foreach (IntPtr handle in gone)
             {
-                Spill(films[handle]);
-                films.Remove(handle);
+                // A closed or minimised window drops all of its water where it stood.
+                WaterLedge ledge = ledges[handle];
+                ledge.Release(1, (x, y, mass) => Throw(x, y, mass, 0, 10, IntPtr.Zero));
+                ledges.Remove(handle);
             }
+        }
+
+        /// <summary>
+        /// Finds the ledge of a window and follows its movement. Water travels with the window, but a share
+        /// that grows with the jump stays behind and is thrown with the window's speed, as snow does.
+        /// </summary>
+        private WaterLedge Locate(IntPtr handle, Rect bounds, double x, double y, double width, double scanTime)
+        {
+            WaterLedge ledge;
+            if (!ledges.TryGetValue(handle, out ledge))
+            {
+                ledge = new WaterLedge(handle);
+                ledge.Place(bounds, x, y, width);
+                ledges.Add(handle, ledge);
+                return ledge;
+            }
+            if (ledge.X == x && ledge.Y == y && ledge.Width == width) return ledge;
+            double shift = bounds.Width == ledge.Window.Width ? bounds.Left - ledge.Window.Left : 0;
+            double vertical = y - ledge.Y;
+            double travel = Math.Sqrt(shift * shift + vertical * vertical);
+            double loosened = 1 - Math.Exp(-travel / 28);
+            double vx = Clamp(shift / scanTime * 0.55, -480, 480);
+            double vy = Clamp(vertical / scanTime * 0.35, -150, 170);
+            if (loosened > 0.01)
+                ledge.Release(loosened, (px, py, mass) => Throw(px + shift * 0.25, py, mass, vx, vy - 30, handle));
+            ledge.Place(bounds, x, y, width);
+            return ledge;
+        }
+
+        /// <summary>Releases water as one to three beads with a little scatter around (vx, vy).</summary>
+        private void Throw(double x, double y, double mass, double vx, double vy, IntPtr source)
+        {
+            int parts = mass > WaterLedge.DropMass * 3 ? 3 : mass > WaterLedge.DropMass * 1.5 ? 2 : 1;
+            for (int part = 0; part < parts; part++)
+            {
+                if (beads.Count >= MaxBeads)
+                {
+                    int last = beads.Count - 1;
+                    Bead merged = beads[last];
+                    merged.Mass += mass * (parts - part) / parts;
+                    beads[last] = merged;
+                    return;
+                }
+                beads.Add(new Bead
+                {
+                    X = x + (random.NextDouble() - 0.5) * 6, Y = y - random.NextDouble() * 2, Mass = mass / parts, Life = 8,
+                    VX = vx + (random.NextDouble() * 2 - 1) * 38, VY = vy - random.NextDouble() * 30, Source = source
+                });
+            }
+        }
+
+        /// <summary>Throws a few droplets of spray up from (x, y); used by rain, runners, kicks and the pump.</summary>
+        internal void Splash(double x, double y, int count, double strength)
+        {
+            for (int i = 0; i < count && beads.Count < MaxBeads; i++)
+                beads.Add(new Bead
+                {
+                    X = x, Y = y, Life = 0.3 + random.NextDouble() * 0.25,
+                    VX = (random.NextDouble() * 2 - 1) * 70 * strength * Scale,
+                    VY = -(45 + random.NextDouble() * 70) * strength * Scale
+                });
         }
 
         public void Advance(double seconds, Settings settings, Desktop.Point pointer)
         {
             if (seconds <= 0) return;
             elapsed += seconds;
-            filmsOn = settings.WindowLedges;
+            ledgesOn = settings.WindowLedges;
             AdvanceWeather(seconds, settings);
             double wind = settings.Wind ? 24 + 32 * Math.Sin(elapsed * 0.27) : 0;
             if (gust > 0)
@@ -223,12 +276,12 @@ namespace SnowDesk
             }
             AdvanceDrops(seconds, settings, wind);
             AdvanceWater(seconds, settings);
-            AdvanceSparks(seconds);
+            AdvanceBeads(seconds, wind);
             for (int i = ripples.Count - 1; i >= 0; i--)
             {
                 Ripple ripple = ripples[i];
                 ripple.Age += seconds;
-                if (ripple.Age >= 0.7) ripples.RemoveAt(i);
+                if (ripple.Age >= 0.8) ripples.RemoveAt(i);
                 else ripples[i] = ripple;
             }
             cast.Advance(seconds, settings);
@@ -243,7 +296,7 @@ namespace SnowDesk
             intensity += ((raining ? 1 : 0) - intensity) * ease;
             double rainbowTarget = !raining && sunTime < 24 && settings.Has(SummerEffect.Rainbow) ? 1 - intensity : 0;
             rainbow += (rainbowTarget - rainbow) * (1 - Math.Exp(-seconds * 0.8));
-            sunGlow += ((raining ? 0 : 1) - sunGlow) * (1 - Math.Exp(-seconds * 0.6));
+            sunGlow += ((raining || !settings.Has(SummerEffect.Rainbow) ? 0 : 1) - sunGlow) * (1 - Math.Exp(-seconds * 0.6));
         }
 
         private void AdvanceDrops(double seconds, Settings settings, double wind)
@@ -256,7 +309,7 @@ namespace SnowDesk
                 double oldX = drop.X, oldY = drop.Y;
                 drop.X += wind * (0.7 + drop.Layer * 0.2) * seconds;
                 drop.Y += drop.Speed * seconds;
-                bool landed = drop.Layer > 0 && Land(oldX, oldY, drop.X, drop.Y);
+                bool landed = drop.Layer > 0 && Land(oldY, drop.X, drop.Y, drop.Layer);
                 if (landed || drop.Y > Ground + 4)
                 {
                     if (dropCount > target)
@@ -278,74 +331,39 @@ namespace SnowDesk
         private Drop NewDrop(double y)
         {
             int layer = random.Next(3);
+            double size = Height < 400 ? 0.55 : Math.Min(1.3, Scale);
             return new Drop
             {
                 X = random.NextDouble() * Width, Y = y, Layer = layer,
-                Speed = (520 + layer * 170 + random.NextDouble() * 90) * Math.Max(0.55, Scale * (Height < 400 ? 0.5 : 1)),
-                Length = (7 + layer * 4 + random.NextDouble() * 3) * Math.Max(0.6, Scale * (Height < 400 ? 0.6 : 1))
+                Speed = (560 + layer * 160 + random.NextDouble() * 90) * size,
+                Length = (5 + layer * 2.6 + random.NextDouble() * 2.5) * size
             };
         }
 
-        private bool Land(double oldX, double oldY, double x, double y)
+        private bool Land(double oldY, double x, double y, int layer)
         {
-            foreach (Film film in visibleFilms)
-            {
-                if (!filmsOn) break;
-                double surface = film.Top - film.Height;
-                if (oldY > surface || y < surface || x < film.Left || x >= film.Left + film.Width) continue;
-                int cell = Math.Min(film.Visible.Length - 1, (int)((x - film.Left) / Cell));
-                if (!film.Visible[cell]) continue;
-                if (random.NextDouble() < 0.55) Splash(x, surface, 2, 0.8);
-                return true;
-            }
-            if (y < Ground - 12 * Scale) return false;
+            if (ledgesOn)
+                foreach (WaterLedge ledge in visibleLedges)
+                {
+                    if (x < ledge.X || x >= ledge.X + ledge.Width || !ledge.VisibleAt(x)) continue;
+                    double surface = ledge.SurfaceAt(x);
+                    if (oldY > surface || y < surface) continue;
+                    ledge.Add(x, 0.5 * layer);
+                    if (random.NextDouble() < 0.4) Splash(x, surface, 2, 0.55);
+                    return true;
+                }
+            if (y < Ground - 14 * Scale) return false;
             foreach (Pool pool in pools)
             {
                 double surface = pool.SurfaceAt(x, Ground, Scale);
                 if (double.IsNaN(surface) || oldY > surface || y < surface) continue;
-                if (ripples.Count < MaxRipples && random.NextDouble() < 0.5)
+                if (ripples.Count < MaxRipples && random.NextDouble() < 0.55)
                     ripples.Add(new Ripple { X = x, Y = surface + 1, Size = (3 + random.NextDouble() * 4) * Scale });
                 return true;
             }
             if (y < Ground) return false;
-            if (random.NextDouble() < 0.45) Splash(x, Ground - 1, 2, 1);
+            if (random.NextDouble() < 0.4) Splash(x, Ground - 1, 2, 0.8);
             return true;
-        }
-
-        /// <summary>Throws a few droplets up from (x, y); used by rain, runners, kicks and the pump outlet.</summary>
-        internal void Splash(double x, double y, int count, double strength)
-        {
-            for (int i = 0; i < count && sparks.Count < MaxSparks; i++)
-                sparks.Add(new Spark
-                {
-                    X = x, Y = y, Life = 0.3 + random.NextDouble() * 0.25,
-                    VX = (random.NextDouble() * 2 - 1) * 70 * strength * Scale,
-                    VY = -(45 + random.NextDouble() * 70) * strength * Scale
-                });
-        }
-
-        /// <summary>Releases a stream of drops along a direction, e.g. water leaving the pump hose.</summary>
-        internal void Spray(double x, double y, double vx, double vy)
-        {
-            if (sparks.Count >= MaxSparks) return;
-            sparks.Add(new Spark
-            {
-                X = x, Y = y, Life = 1.4, Drip = true,
-                VX = vx * (0.85 + random.NextDouble() * 0.3) * Scale, VY = vy * (0.8 + random.NextDouble() * 0.4) * Scale
-            });
-        }
-
-        private void Drip(double x, double y)
-        {
-            if (sparks.Count < MaxSparks)
-                sparks.Add(new Spark { X = x, Y = y, VY = 18, Life = 6, Drip = true });
-        }
-
-        private void Spill(Film film)
-        {
-            int count = (int)(film.Level * 8);
-            for (int i = 0; i < count; i++)
-                Drip(i % 2 == 0 ? film.Left + 2 : film.Left + film.Width - 2, film.Top - random.NextDouble() * 3);
         }
 
         private void AdvanceWater(double seconds, Settings settings)
@@ -358,70 +376,139 @@ namespace SnowDesk
                 pool.Volume -= pool.Drain * seconds;
                 pool.Volume = Math.Max(0, Math.Min(1, pool.Volume));
             }
-            foreach (Film film in films.Values)
+            foreach (WaterLedge ledge in ledges.Values)
             {
-                film.Level = Math.Max(0, Math.Min(1, film.Level + (raining ? 0.05 * intensity : -0.07) * rate));
-                if (!filmsOn) film.Level = 0;
-                if (film.Level < 0.88 || !raining || random.NextDouble() > seconds * 3) continue;
-                bool right = random.Next(2) == 0;
-                int cell = right ? film.Visible.Length - 1 : 0;
-                if (film.Visible[cell]) Drip(right ? film.Left + film.Width - 1.5 : film.Left + 1.5, film.Top);
+                if (!ledgesOn)
+                {
+                    ledge.Evaporate(WaterLedge.MaxDepth);
+                    continue;
+                }
+                if (raining) ledge.Rain(0.14 * intensity * (0.7 + settings.Density * 0.3) * rate);
+                else ledge.Evaporate(0.11 * rate);
+                IntPtr source = ledge.Handle;
+                ledge.Flow(seconds, (x, y, mass) => Throw(x, y, mass, 0, 6, source));
             }
         }
 
-        private void AdvanceSparks(double seconds)
+        private void AdvanceBeads(double seconds, double wind)
         {
-            for (int i = sparks.Count - 1; i >= 0; i--)
+            for (int i = beads.Count - 1; i >= 0; i--)
             {
-                Spark spark = sparks[i];
-                spark.Age += seconds;
-                spark.VY += 420 * seconds;
-                spark.X += spark.VX * seconds;
-                spark.Y += spark.VY * seconds;
-                bool done = spark.Age >= spark.Life || spark.Y > Height + 4;
-                if (!done && spark.Drip && spark.Y >= Ground - 1)
-                {
-                    done = true;
-                    bool inPool = false;
-                    foreach (Pool pool in pools)
-                        inPool |= !double.IsNaN(pool.SurfaceAt(spark.X, Ground, Scale));
-                    if (inPool && ripples.Count < MaxRipples)
-                        ripples.Add(new Ripple { X = spark.X, Y = Ground - 2, Size = 5 * Scale });
-                    else if (!inPool) Splash(spark.X, Ground - 1, 1, 0.6);
-                }
+                Bead bead = beads[i];
+                double oldX = bead.X, oldY = bead.Y;
+                bead.Age += seconds;
+                bead.VX += (wind * 0.3 - bead.VX * 0.6) * seconds;
+                bead.VY = Math.Min(900, bead.VY + Gravity * seconds);
+                bead.X += bead.VX * seconds;
+                bead.Y += bead.VY * seconds;
+                bool done = bead.Age >= bead.Life || bead.Y > Height + 6 || bead.X < -20 || bead.X > Width + 20;
+                if (!done && bead.Mass > 0) done = Deposit(oldY, ref bead);
+                else if (!done) done = bead.Y >= Ground;
                 if (done)
                 {
-                    sparks[i] = sparks[sparks.Count - 1];
-                    sparks.RemoveAt(sparks.Count - 1);
+                    beads[i] = beads[beads.Count - 1];
+                    beads.RemoveAt(beads.Count - 1);
                 }
-                else sparks[i] = spark;
+                else beads[i] = bead;
             }
+        }
+
+        /// <summary>Lands a falling bead on a window ledge or puddle below it; true once it is absorbed.</summary>
+        private bool Deposit(double oldY, ref Bead bead)
+        {
+            if (bead.Y <= oldY) return false;
+            if (ledgesOn)
+                foreach (WaterLedge ledge in visibleLedges)
+                {
+                    if (bead.X < ledge.X || bead.X >= ledge.X + ledge.Width || !ledge.VisibleAt(bead.X)) continue;
+                    if (ledge.Handle == bead.Source && bead.Age < 0.3) continue;
+                    double surface = ledge.SurfaceAt(bead.X);
+                    if (oldY > surface + 1 || bead.Y < surface) continue;
+                    ledge.Add(bead.X, bead.Mass);
+                    if (bead.VY > 260) Splash(bead.X, surface, 2, 0.5);
+                    return true;
+                }
+            if (bead.Y < Ground - 14 * Scale) return false;
+            Pool target = null;
+            double nearest = 60 * Scale;
+            foreach (Pool pool in pools)
+            {
+                double surface = pool.SurfaceAt(bead.X, Ground, Scale);
+                if (!double.IsNaN(surface) && bead.Y >= surface)
+                {
+                    target = pool;
+                    break;
+                }
+                double gap = Math.Abs(bead.X - pool.X) - pool.Half;
+                if (bead.Y >= Ground && gap < nearest)
+                {
+                    nearest = gap;
+                    target = pool;
+                }
+            }
+            if (target == null) return bead.Y >= Ground && SplashOut(bead.X);
+            target.Absorb(bead.Mass);
+            if (ripples.Count < MaxRipples)
+                ripples.Add(new Ripple { X = bead.X, Y = Ground - target.Depth(Scale) * 0.5, Size = 6 * Scale });
+            return true;
+        }
+
+        private bool SplashOut(double x)
+        {
+            Splash(x, Ground - 1, 2, 0.7);
+            return true;
         }
 
         public void Draw(Canvas drawing)
         {
             if (sunGlow > 0.02 || rainbow > 0.02) drawing.DrawArt(0, 0, 1, false, DrawSky);
-            if (filmsOn && visibleFilms.Count > 0) drawing.DrawArt(0, 0, 1, false, DrawFilms);
-            drawing.DrawArt(0, 0, 1, false, DrawPools);
+            if (ledgesOn && visibleLedges.Count > 0) drawing.DrawArt(0, 0, 1, false, DrawLedges);
+            drawing.DrawArt(0, 0, 1, false, g =>
+            {
+                foreach (Pool pool in pools) SummerArt.Puddle(g, pool, Ground, Scale, elapsed);
+            });
             cast.DrawWater(drawing);
             cast.Draw(drawing);
             foreach (Ripple ripple in ripples)
             {
-                double t = ripple.Age / 0.7;
+                double t = ripple.Age / 0.8;
                 Pen pen = RipplePens[Math.Min(2, (int)((1 - t) * 3))];
                 double radius = ripple.Size * (0.3 + t);
-                drawing.StrokeEllipse(pen, new WPoint(ripple.X, ripple.Y), radius, radius * 0.28);
+                drawing.StrokeEllipse(pen, new WPoint(ripple.X, ripple.Y), radius, radius * 0.26);
+                if (ripple.Size > 5 && t < 0.6)
+                    drawing.StrokeEllipse(pen, new WPoint(ripple.X, ripple.Y), radius * 0.5, radius * 0.13);
             }
             for (int i = 0; i < dropCount; i++)
             {
                 Drop drop = drops[i];
-                double slant = drop.Length * 0.08;
-                drawing.DrawLine(DropPens[drop.Layer], new WPoint(drop.X - slant, drop.Y - drop.Length), new WPoint(drop.X, drop.Y));
+                double slant = drop.Length * 0.06;
+                var tail = new WPoint(drop.X - slant, drop.Y - drop.Length);
+                var neck = new WPoint(drop.X - slant * 0.35, drop.Y - drop.Length * 0.35);
+                drawing.DrawLine(TailPens[drop.Layer], tail, neck);
+                drawing.DrawLine(HeadPens[drop.Layer], neck, new WPoint(drop.X, drop.Y));
             }
-            foreach (Spark spark in sparks)
+            foreach (Bead bead in beads)
             {
-                double radius = spark.Drip ? 1.3 : 0.95;
-                drawing.DrawEllipse(SparkBrush, null, new WPoint(spark.X, spark.Y), radius, spark.Drip ? radius * 1.4 : radius);
+                if (bead.Mass <= 0)
+                {
+                    drawing.DrawEllipse(MistBrush, null, new WPoint(bead.X, bead.Y), 0.9, 0.9);
+                    continue;
+                }
+                double radius = Clamp(0.9 + Math.Sqrt(bead.Mass) * 0.55, 1, 3.4);
+                double stretch = 1 + Math.Min(0.9, Math.Abs(bead.VY) / 650);
+                drawing.DrawEllipse(BeadBrush, null, new WPoint(bead.X, bead.Y), radius, radius * stretch);
+                drawing.DrawEllipse(BeadShine, null, new WPoint(bead.X - radius * 0.35, bead.Y - radius * 0.4),
+                    radius * 0.32, radius * 0.32);
+            }
+        }
+
+        private void DrawLedges(Graphics g)
+        {
+            foreach (WaterLedge ledge in visibleLedges)
+            {
+                using (var body = new LinearGradientBrush(new PointF(0, (float)(ledge.Y - WaterLedge.MaxDepth)),
+                    new PointF(0, (float)ledge.Y + 1), Color.FromArgb(150, 176, 222, 246), Color.FromArgb(205, 70, 138, 196)))
+                    ledge.Draw(g, body, elapsed);
             }
         }
 
@@ -436,51 +523,9 @@ namespace SnowDesk
                 SummerArt.Rainbow(g, (float)(Width * 0.5), (float)Ground, (float)Math.Min(Width * 0.42, Ground * 0.86), rainbow);
         }
 
-        private void DrawFilms(Graphics g)
+        private static double Clamp(double value, double min, double max)
         {
-            foreach (Film film in visibleFilms)
-            {
-                if (film.Level < 0.03) continue;
-                float height = (float)film.Height;
-                int start = -1;
-                for (int cell = 0; cell <= film.Visible.Length; cell++)
-                {
-                    bool visible = cell < film.Visible.Length && film.Visible[cell];
-                    if (visible && start < 0) start = cell;
-                    if (visible || start < 0) continue;
-                    float left = (float)(film.Left + start * Cell);
-                    float right = (float)Math.Min(film.Left + film.Width, film.Left + cell * Cell);
-                    using (GraphicsPath band = DeskStyle.Rounded(
-                        Rectangle.Round(new RectangleF(left, (float)film.Top - height, right - left, height + 1)),
-                        Math.Max(1, (int)(height * 0.5))))
-                        g.FillPath(FilmBrush, band);
-                    g.DrawLine(FilmGlint, left + 3, (float)film.Top - height + 0.6f, right - 3, (float)film.Top - height + 0.6f);
-                    start = -1;
-                }
-            }
-        }
-
-        private void DrawPools(Graphics g)
-        {
-            foreach (Pool pool in pools)
-            {
-                double half = pool.Half;
-                if (half < 3) continue;
-                float depth = (float)pool.Depth(Scale);
-                var bounds = new RectangleF((float)(pool.X - half), (float)Ground - depth, (float)half * 2, depth * 2);
-                using (var water = new GraphicsPath())
-                {
-                    water.AddArc(bounds, 180, 180);
-                    water.CloseFigure();
-                    using (var fill = new LinearGradientBrush(new RectangleF(bounds.X, bounds.Y - 1, bounds.Width, depth + 2),
-                        Color.FromArgb(150, 150, 212, 244), Color.FromArgb(190, 58, 128, 190), LinearGradientMode.Vertical))
-                        g.FillPath(fill, water);
-                    g.DrawArc(WaterEdge, bounds, 200, 140);
-                }
-                float glint = (float)(half * 0.35);
-                g.DrawLine(FilmGlint, (float)pool.X - glint, (float)Ground - depth * 0.55f, (float)pool.X - glint * 0.2f,
-                    (float)Ground - depth * 0.55f);
-            }
+            return Math.Max(min, Math.Min(max, value));
         }
 
         private static Pen Line(int alpha, int red, int green, int blue, float width)

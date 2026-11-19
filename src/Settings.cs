@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 
@@ -43,6 +44,9 @@ namespace SnowDesk
         internal Effect Effects = Effect.Trees | Effect.Sleigh | Effect.Santa | Effect.Plow;
         internal SummerEffect Summer = SummerEffect.All;
 
+        /// <summary>Device names (Screen.DeviceName) of displays the user switched the effect off on.</summary>
+        internal readonly HashSet<string> HiddenScreens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         private Settings(string filePath)
         {
             this.filePath = filePath;
@@ -58,6 +62,11 @@ namespace SnowDesk
             return (Summer & effect) != 0;
         }
 
+        internal bool ShowsOn(string device)
+        {
+            return !HiddenScreens.Contains(device);
+        }
+
         internal static Settings Load(string path = null)
         {
             var settings = new Settings(path ?? DefaultPath);
@@ -71,6 +80,12 @@ namespace SnowDesk
                     if (key == "theme")
                     {
                         settings.Theme = DesktopTheme.FromId(parts[1]);
+                        continue;
+                    }
+                    if (key == "hiddenscreens")
+                    {
+                        foreach (string device in parts[1].Split('|'))
+                            if (device.Length > 0) settings.HiddenScreens.Add(device);
                         continue;
                     }
                     int value;
@@ -95,9 +110,9 @@ namespace SnowDesk
             Directory.CreateDirectory(Path.GetDirectoryName(filePath));
             string temp = filePath + ".tmp";
             File.WriteAllText(temp, string.Format(CultureInfo.InvariantCulture,
-                "density={0}\nfps={1}\nwind={2}\neffects={3}\nsweep={4}\nledges={5}\nicicles={6}\ntheme={7}\nsummer={8}\n",
+                "density={0}\nfps={1}\nwind={2}\neffects={3}\nsweep={4}\nledges={5}\nicicles={6}\ntheme={7}\nsummer={8}\nhiddenscreens={9}\n",
                 Density, Rate, Wind ? 1 : 0, (int)Effects, CursorSweep ? 1 : 0, WindowLedges ? 1 : 0,
-                Icicles ? 1 : 0, Theme.Id, (int)Summer));
+                Icicles ? 1 : 0, Theme.Id, (int)Summer, string.Join("|", HiddenScreens)));
             if (File.Exists(filePath)) File.Replace(temp, filePath, null);
             else File.Move(temp, filePath);
         }

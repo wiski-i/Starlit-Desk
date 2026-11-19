@@ -30,6 +30,7 @@ namespace SnowDesk
         private readonly Forms.NotifyIcon tray;
         private readonly Drawing.Icon icon;
         private DeskWindow dashboard;
+        private Drawing.Region dashboardShield;
         private bool running = true;
         private bool sessionLocked;
         private bool geometryDirty;
@@ -112,6 +113,7 @@ namespace SnowDesk
                 tray.ContextMenuStrip.Dispose();
                 tray.Dispose();
                 if (dashboard != null) dashboard.Dispose();
+                if (dashboardShield != null) dashboardShield.Dispose();
                 icon.Dispose();
                 uiThread.Dispose();
             }
@@ -207,6 +209,16 @@ namespace SnowDesk
             foreach (Forms.Screen screen in Forms.Screen.AllScreens)
                 overlays.Add(new Overlay(screen, settings.Theme));
             RefreshDesktop(null, EventArgs.Empty);
+            SyncDashboard();
+        }
+
+        /// <summary>Turns the effect on or off for one display; the other displays keep their state.</summary>
+        internal void SetScreenShown(string device, bool shown)
+        {
+            if (shown) settings.HiddenScreens.Remove(device);
+            else settings.HiddenScreens.Add(device);
+            RefreshDesktop(null, EventArgs.Empty);
+            SaveSettings();
         }
 
         private void RefreshDesktop(object sender, EventArgs e)
@@ -220,7 +232,7 @@ namespace SnowDesk
             var size = new Drawing.Size();
             foreach (Overlay overlay in overlays)
             {
-                if (!active || overlay.DisplayName == fullscreen)
+                if (!active || overlay.DisplayName == fullscreen || !settings.ShowsOn(overlay.DisplayName))
                 {
                     if (overlay.IsVisible) overlay.Scene.ResetPointer();
                     overlay.Close();
@@ -246,12 +258,15 @@ namespace SnowDesk
 
             Drawing.Rectangle dashboardBounds = DashboardBounds();
             bool needsGeometry = overlays.Exists(item => item.Scene.UsesWindowGeometry(settings));
-            var geometry = needsGeometry ? Desktop.ReadWindows(ShellChanged, shellFocus) : new List<Desktop.WindowBounds>();
+            var windows = needsGeometry || !dashboardBounds.IsEmpty ?
+                Desktop.ReadWindows(ShellChanged, shellFocus) : new List<Desktop.WindowBounds>();
+            var geometry = needsGeometry ? windows : new List<Desktop.WindowBounds>();
+            UpdateShield(windows, dashboardBounds);
             foreach (Overlay overlay in overlays)
             {
-                if (overlay.DisplayName == fullscreen) continue;
+                if (overlay.DisplayName == fullscreen || !settings.ShowsOn(overlay.DisplayName)) continue;
                 overlay.Scene.UpdateLedges(geometry);
-                overlay.Reveal(frameSurface, dashboardBounds);
+                overlay.Reveal(frameSurface, dashboardShield);
                 var popup = geometry.Find(item => item.IsShellPopup && overlay.Contains(new Desktop.Point
                 {
                     X = (int)(item.Bounds.Left + item.Bounds.Width * 0.5), Y = (int)item.Bounds.Top
@@ -293,8 +308,28 @@ namespace SnowDesk
                 if (snow != null && snow.IsHoldingTree)
                     snow.DragTree(cursor, elapsed, Desktop.PrimaryButtonDown());
                 overlay.Scene.Advance(elapsed, settings, cursor);
-                overlay.RenderFrame(frameSurface, dashboardBounds);
+                overlay.RenderFrame(frameSurface, dashboardShield);
                 overlay.UpdateTreeTarget(dashboardBounds);
+            }
+        }
+
+        /// <summary>
+        /// The effect is kept off the panel only where the panel is really visible: windows above it in the
+        /// z-order take their part back, so a panel left behind other windows no longer blocks the rain.
+        /// </summary>
+        private void UpdateShield(List<Desktop.WindowBounds> windows, Drawing.Rectangle bounds)
+        {
+            if (dashboardShield != null) dashboardShield.Dispose();
+            dashboardShield = null;
+            if (bounds.IsEmpty) return;
+            dashboardShield = new Drawing.Region(bounds);
+            IntPtr handle = dashboard.Handle;
+            int index = windows.FindIndex(item => item.Handle == handle);
+            for (int i = 0; i < index; i++)
+            {
+                System.Windows.Rect above = windows[i].Bounds;
+                dashboardShield.Exclude(new Drawing.RectangleF((float)above.X, (float)above.Y,
+                    (float)above.Width, (float)above.Height));
             }
         }
 
@@ -302,6 +337,17 @@ namespace SnowDesk
         {
             return dashboard != null && dashboard.Visible && dashboard.WindowState != Forms.FormWindowState.Minimized
                 ? dashboard.Bounds : Drawing.Rectangle.Empty;
+        }
+
+        /// <summary>
+        /// The window-event hooks skip this process, so the panel reports its own moves here; otherwise snow or
+        /// water on its top edge stays behind at the old position.
+        /// </summary>
+        internal void DashboardChanged()
+        {
+            if (closing || !running || sessionLocked) return;
+            geometryDirty = true;
+            if (!frameClock.Running && !windowsTimer.Enabled) windowsTimer.Start();
         }
 
         internal Settings Preferences { get { return settings; } }
@@ -365,6 +411,9 @@ namespace SnowDesk
                 themes.DropDownOpening += (sender, e) => option.Checked = settings.Theme == theme;
                 themes.DropDownItems.Add(option);
             }
+            var screens = new Forms.ToolStripMenuItem("Ekranlar");
+            FillScreenMenu(screens);
+            screens.DropDownOpening += (sender, e) => FillScreenMenu(screens);
             var density = new Forms.ToolStripMenuItem("Kar yoğunluğu");
             AddOption(density, "Hafif", 0, () => settings.Density, value => settings.Density = value);
             AddOption(density, "Orta", 1, () => settings.Density, value => settings.Density = value);
@@ -393,13 +442,14 @@ namespace SnowDesk
             menu.Items.AddRange(new Forms.ToolStripItem[]
             {
                 new Forms.ToolStripMenuItem("Kontrol panelini aç", null, (sender, e) => ShowDashboard()),
-                toggle, new Forms.ToolStripSeparator(), themes, density, frameRate, sweep, ledges, wind,
+                toggle, new Forms.ToolStripSeparator(), themes, screens, density, frameRate, sweep, ledges, wind,
                 decorations, manual, startup,
                 new Forms.ToolStripSeparator(), new Forms.ToolStripMenuItem("Çıkış", null, (sender, e) => ExitThread())
             });
             menu.Opening += delegate
             {
                 bool winter = settings.Theme == DesktopTheme.Winter;
+                screens.Available = Forms.Screen.AllScreens.Length > 1;
                 sweep.Available = decorations.Available = manual.Available = winter;
                 density.Text = winter ? "Kar yoğunluğu" : "Yağmur yoğunluğu";
                 ledges.Text = winter ? "Pencere ve menülerde kar" : "Pencerelerde su";
@@ -410,6 +460,33 @@ namespace SnowDesk
                 startup.Checked = HasStartup();
             };
             return menu;
+        }
+
+        private void FillScreenMenu(Forms.ToolStripMenuItem menu)
+        {
+            while (menu.DropDownItems.Count != 0)
+            {
+                Forms.ToolStripItem old = menu.DropDownItems[0];
+                menu.DropDownItems.RemoveAt(0);
+                old.Dispose();
+            }
+            foreach (Forms.Screen screen in Forms.Screen.AllScreens)
+            {
+                string device = screen.DeviceName;
+                menu.DropDownItems.Add(new Forms.ToolStripMenuItem(ScreenLabel(screen), null,
+                    (sender, e) => SetScreenShown(device, !settings.ShowsOn(device))) { Checked = settings.ShowsOn(device) });
+            }
+        }
+
+        /// <summary>"Ekran 2 · 2560×1440 · ana ekran", numbered like Windows display settings.</summary>
+        internal static string ScreenLabel(Forms.Screen screen)
+        {
+            string name = screen.DeviceName;
+            int digits = name.Length;
+            while (digits > 0 && char.IsDigit(name[digits - 1])) digits--;
+            string number = digits < name.Length ? name.Substring(digits) : "?";
+            return "Ekran " + number + " · " + screen.Bounds.Width + "×" + screen.Bounds.Height +
+                (screen.Primary ? " · ana ekran" : "");
         }
 
         internal void RunSnowAction(SnowAction action)

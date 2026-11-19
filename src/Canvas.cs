@@ -40,7 +40,15 @@ namespace SnowDesk
                 graphics.CompositingMode = CompositingMode.SourceOver;
             }
         }
-        internal void Exclude(Rectangle bounds) { graphics.ExcludeClip(bounds); }
+        /// <summary>Removes a screen-space region from this frame's clip after shifting it by (dx, dy).</summary>
+        internal void Exclude(Region area, int dx, int dy)
+        {
+            using (Region local = area.Clone())
+            {
+                local.Translate(dx, dy);
+                graphics.ExcludeClip(local);
+            }
+        }
 
         internal void Flush() { graphics.Flush(FlushIntention.Sync); }
         public void Dispose() { graphics.Dispose(); }

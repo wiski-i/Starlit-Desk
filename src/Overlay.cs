@@ -28,7 +28,7 @@ namespace SnowDesk
             Scene = theme.CreateScene(display);
         }
 
-        internal void Reveal(FrameSurface frame, Rectangle dashboard)
+        internal void Reveal(FrameSurface frame, Region dashboard)
         {
             if (IsVisible) return;
             if (window == IntPtr.Zero) Open(frame, dashboard);
@@ -36,7 +36,7 @@ namespace SnowDesk
             IsVisible = true;
         }
 
-        private void Open(FrameSurface frame, Rectangle dashboard)
+        private void Open(FrameSurface frame, Region dashboard)
         {
             Rectangle bounds = screen.Bounds;
             try
@@ -108,16 +108,12 @@ namespace SnowDesk
             treeTarget.Place(bounds, (int)Math.Ceiling(visibleBottom) - bounds.Top);
         }
 
-        internal void RenderFrame(FrameSurface frame, Rectangle dashboard)
+        /// <summary>Draws the scene, leaving out the visible part of the control panel (<paramref name="dashboard"/>, screen coordinates, may be null).</summary>
+        internal void RenderFrame(FrameSurface frame, Region dashboard)
         {
             Rectangle bounds = screen.Bounds;
             frame.Canvas.BeginFrame(bounds.Width, bounds.Height);
-            Rectangle blocked = Rectangle.Intersect(bounds, dashboard);
-            if (blocked.Width > 0 && blocked.Height > 0)
-            {
-                blocked.Offset(-bounds.X, -bounds.Y);
-                frame.Canvas.Exclude(blocked);
-            }
+            if (dashboard != null) frame.Canvas.Exclude(dashboard, -bounds.X, -bounds.Y);
             Scene.Draw(frame.Canvas);
             frame.Canvas.Flush();
             var destination = new Desktop.Point { X = bounds.X, Y = bounds.Y };

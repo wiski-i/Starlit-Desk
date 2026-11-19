@@ -266,7 +266,7 @@ namespace SnowDesk
             Wheel(g, 14, phase);
         }
 
-        private static void Wheel(Graphics g, float x, double phase)
+        internal static void Wheel(Graphics g, float x, double phase)
         {
             Oval(g, Dark, x - 6.5f, -13, 13, 13);
             Oval(g, FurShadow, x - 4, -10.5f, 8, 8);
@@ -307,7 +307,7 @@ namespace SnowDesk
             return new Pen(color, width) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
         }
 
-        private static Brush Ramp(float top, float bottom, Color light, Color dark)
+        internal static Brush Ramp(float top, float bottom, Color light, Color dark)
         {
             return new LinearGradientBrush(new RectangleF(-68, top, 136, bottom - top),
                 light, dark, LinearGradientMode.Vertical) { WrapMode = WrapMode.TileFlipY };
@@ -367,7 +367,7 @@ namespace SnowDesk
             return path;
         }
 
-        private static GraphicsPath RoundedPolygon(PointF[] points, float rounding = 0.19f)
+        internal static GraphicsPath RoundedPolygon(PointF[] points, float rounding = 0.19f)
         {
             var path = new GraphicsPath();
             PointF last = new PointF();
