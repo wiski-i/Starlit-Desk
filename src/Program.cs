@@ -448,11 +448,16 @@ namespace SnowDesk
             });
             menu.Opening += delegate
             {
-                bool winter = settings.Theme == DesktopTheme.Winter;
+                DesktopTheme theme = settings.Theme;
+                bool winter = theme == DesktopTheme.Winter;
                 screens.Available = Forms.Screen.AllScreens.Length > 1;
-                sweep.Available = decorations.Available = manual.Available = winter;
-                density.Text = winter ? "Kar yoğunluğu" : "Yağmur yoğunluğu";
-                ledges.Text = winter ? "Pencere ve menülerde kar" : "Pencerelerde su";
+                decorations.Available = manual.Available = winter;
+                sweep.Available = theme != DesktopTheme.Summer;
+                density.Text = winter ? "Kar yoğunluğu" : theme == DesktopTheme.Summer ? "Yağmur yoğunluğu" :
+                    theme == DesktopTheme.Autumn ? "Yaprak yoğunluğu" : "Çiçek yaprağı yoğunluğu";
+                ledges.Text = winter ? "Pencere ve menülerde kar" : theme == DesktopTheme.Summer ? "Pencerelerde su" :
+                    theme == DesktopTheme.Autumn ? "Pencerelerde yaprak" : "Pencerelerde çiçek yaprağı";
+                sweep.Text = winter ? "İmleçle karı dağıt" : "İmleçle yaprakları savur";
                 toggle.Text = running ? "Duraklat" : "Devam et";
                 wind.Checked = settings.Wind;
                 sweep.Checked = settings.CursorSweep;
@@ -500,6 +505,14 @@ namespace SnowDesk
 
             Overlay target = ActionTarget();
             if (target != null) action.Apply(target.Snow);
+        }
+
+        internal void RunSeasonAction(SeasonAction action)
+        {
+            if (settings.Theme != DesktopTheme.Autumn && settings.Theme != DesktopTheme.Spring) return;
+            Overlay target = ActionTarget();
+            var scene = target == null ? null : target.Scene as SeasonScene;
+            if (scene != null) action.Apply(scene);
         }
 
         internal void RunSummerAction(SummerAction action)

@@ -14,7 +14,17 @@ namespace SnowDesk
             "summer", "Yaz", "Yaz sağanağı, su birikintileri ve yaz süsleri.",
             display => new SummerScene(display), () => new ScenePreview(viewport => new SummerScene(viewport)));
 
-        internal static readonly IReadOnlyList<DesktopTheme> All = Array.AsReadOnly(new[] { Winter, Summer });
+        internal static readonly DesktopTheme Autumn = new DesktopTheme(
+            "autumn", "Sonbahar", "Süzülen yapraklar ve sonbahar süsleri.",
+            display => new SeasonScene(display, Season.Autumn),
+            () => new ScenePreview(viewport => new SeasonScene(viewport, Season.Autumn)));
+
+        internal static readonly DesktopTheme Spring = new DesktopTheme(
+            "spring", "İlkbahar", "Çiçek yaprakları ve açan bir bahçe.",
+            display => new SeasonScene(display, Season.Spring),
+            () => new ScenePreview(viewport => new SeasonScene(viewport, Season.Spring)));
+
+        internal static readonly IReadOnlyList<DesktopTheme> All = Array.AsReadOnly(new[] { Winter, Spring, Summer, Autumn });
 
         internal readonly string Id;
         internal readonly string Name;

@@ -28,6 +28,37 @@ namespace SnowDesk
         public override string ToString() { return Name; }
     }
 
+    /// <summary>One-shot actions of the autumn and spring themes; commands go to the season's cast.</summary>
+    internal sealed class SeasonAction
+    {
+        internal static readonly SeasonAction[] Autumn =
+        {
+            new SeasonAction("Rüzgâr estir", scene => scene.Gust()),
+            new SeasonAction("Tırmıkçıyı çağır", scene => scene.Cast.Trigger(1)),
+            new SeasonAction("Çocuğu yaprağa atlat", scene => scene.Cast.Trigger(2)),
+            new SeasonAction("Sincabı gönder", scene => scene.Cast.Trigger(3))
+        };
+
+        internal static readonly SeasonAction[] Spring =
+        {
+            new SeasonAction("Kelebek sürüsü", scene => scene.Cast.Trigger(1)),
+            new SeasonAction("Bahçıvanı çağır", scene => scene.Cast.Trigger(2)),
+            new SeasonAction("Kırlangıçları gönder", scene => scene.Cast.Trigger(3)),
+            new SeasonAction("Rüzgâr estir", scene => scene.Gust())
+        };
+
+        internal readonly string Name;
+        internal readonly Action<SeasonScene> Apply;
+
+        private SeasonAction(string name, Action<SeasonScene> apply)
+        {
+            Name = name;
+            Apply = apply;
+        }
+
+        public override string ToString() { return Name; }
+    }
+
     /// <summary>One-shot actions of the summer theme, offered in the panel's action card.</summary>
     internal sealed class SummerAction
     {

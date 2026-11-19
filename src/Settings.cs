@@ -28,6 +28,29 @@ namespace SnowDesk
         All = 63
     }
 
+    /// <summary>Optional pieces of the autumn theme; stored as the "autumn" bit mask.</summary>
+    [Flags]
+    internal enum AutumnEffect
+    {
+        Raker = 1,
+        Kid = 2,
+        Squirrel = 4,
+        Pumpkins = 8,
+        All = 15
+    }
+
+    /// <summary>Optional pieces of the spring theme; stored as the "spring" bit mask.</summary>
+    [Flags]
+    internal enum SpringEffect
+    {
+        Butterflies = 1,
+        Bees = 2,
+        Gardener = 4,
+        Birds = 8,
+        Garden = 16,
+        All = 31
+    }
+
     internal sealed class Settings
     {
         private static readonly string DefaultPath = Path.Combine(
@@ -43,6 +66,8 @@ namespace SnowDesk
         internal bool Icicles = true;
         internal Effect Effects = Effect.Trees | Effect.Sleigh | Effect.Santa | Effect.Plow;
         internal SummerEffect Summer = SummerEffect.All;
+        internal AutumnEffect Autumn = AutumnEffect.All;
+        internal SpringEffect Spring = SpringEffect.All;
 
         /// <summary>Device names (Screen.DeviceName) of displays the user switched the effect off on.</summary>
         internal readonly HashSet<string> HiddenScreens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -61,6 +86,9 @@ namespace SnowDesk
         {
             return (Summer & effect) != 0;
         }
+
+        internal bool Has(AutumnEffect effect) { return (Autumn & effect) != 0; }
+        internal bool Has(SpringEffect effect) { return (Spring & effect) != 0; }
 
         internal bool ShowsOn(string device)
         {
@@ -98,6 +126,8 @@ namespace SnowDesk
                     if (key == "icicles") settings.Icicles = value != 0;
                     if (key == "effects") settings.Effects = (Effect)(value & 31);
                     if (key == "summer") settings.Summer = (SummerEffect)(value & (int)SummerEffect.All);
+                    if (key == "autumn") settings.Autumn = (AutumnEffect)(value & (int)AutumnEffect.All);
+                    if (key == "spring") settings.Spring = (SpringEffect)(value & (int)SpringEffect.All);
                 }
             }
             catch (IOException) { }
@@ -110,9 +140,9 @@ namespace SnowDesk
             Directory.CreateDirectory(Path.GetDirectoryName(filePath));
             string temp = filePath + ".tmp";
             File.WriteAllText(temp, string.Format(CultureInfo.InvariantCulture,
-                "density={0}\nfps={1}\nwind={2}\neffects={3}\nsweep={4}\nledges={5}\nicicles={6}\ntheme={7}\nsummer={8}\nhiddenscreens={9}\n",
+                "density={0}\nfps={1}\nwind={2}\neffects={3}\nsweep={4}\nledges={5}\nicicles={6}\ntheme={7}\nsummer={8}\nhiddenscreens={9}\nautumn={10}\nspring={11}\n",
                 Density, Rate, Wind ? 1 : 0, (int)Effects, CursorSweep ? 1 : 0, WindowLedges ? 1 : 0,
-                Icicles ? 1 : 0, Theme.Id, (int)Summer, string.Join("|", HiddenScreens)));
+                Icicles ? 1 : 0, Theme.Id, (int)Summer, string.Join("|", HiddenScreens), (int)Autumn, (int)Spring));
             if (File.Exists(filePath)) File.Replace(temp, filePath, null);
             else File.Move(temp, filePath);
         }

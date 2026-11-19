@@ -556,7 +556,7 @@ namespace SnowDesk
         }
 
         /// <summary>Fills a limb that runs through the spine points and narrows from w0 to w1, with round ends.</summary>
-        private static void Taper(Graphics g, Brush fill, float w0, float w1, params PointF[] spine)
+        internal static void Taper(Graphics g, Brush fill, float w0, float w1, params PointF[] spine)
         {
             int count = spine.Length;
             var outline = new PointF[count * 2];
