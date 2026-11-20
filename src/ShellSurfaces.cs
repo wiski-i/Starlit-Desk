@@ -44,6 +44,18 @@ namespace SnowDesk
             return windowClass == "NotifyIconOverflowWindow" || windowClass == "TopLevelWindowForOverflowXamlIsland";
         }
 
+        internal static bool IsFlyout(IntPtr hwnd, string windowClass)
+        {
+            if (windowClass == "ControlCenterWindow" || windowClass == "NotificationCenterWindow" ||
+                windowClass == "Windows.UI.ActionCenter" || windowClass == "Xaml_WindowedPopupClass") return true;
+            if (windowClass != "Windows.UI.Core.CoreWindow" && windowClass != "XamlExplorerHostIslandWindow") return false;
+            var title = new StringBuilder(96);
+            GetWindowText(hwnd, title, title.Capacity);
+            string name = title.ToString();
+            return name == "Notification Center" || name == "Action Center" || name == "Quick Settings" ||
+                name == "Bildirim Merkezi" || name == "İşlem Merkezi" || name == "Hızlı Ayarlar";
+        }
+
         internal static Rect OverflowPanel(Rect outer, string windowClass, double scale)
         {
             if (outer.IsEmpty || windowClass != "TopLevelWindowForOverflowXamlIsland") return outer;

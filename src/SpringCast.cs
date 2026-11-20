@@ -23,6 +23,7 @@ namespace SnowDesk
         {
             internal double X, Y, VX, VY, TargetX, TargetY, Rest, Phase;
             internal int Tint, Flower = -1;
+            internal bool Ledge;
         }
 
         private readonly SeasonScene scene;
@@ -35,6 +36,7 @@ namespace SnowDesk
         private int watered = -1;
         private double birdsX, birdsY, birdsDirection = 1, nextBirds = 18;
         private bool birds, showGarden = true;
+        private double daylight, dayTarget, nextLightSample;
 
         internal SpringCast(SeasonScene scene)
         {
@@ -70,13 +72,28 @@ namespace SnowDesk
         public void Advance(double seconds, Settings settings)
         {
             clock += seconds * scene.Pace;
+            if (clock >= nextLightSample)
+            {
+                dayTarget = Sunlight(DateTime.Now.TimeOfDay.TotalHours);
+                if (nextLightSample == 0) daylight = dayTarget;
+                nextLightSample = clock + 15;
+            }
+            daylight += (dayTarget - daylight) * (1 - Math.Exp(-seconds * 0.8));
+            if (settings.QuietScene)
+            {
+                butterflies.Clear();
+                bees.Clear();
+                birds = showGarden = false;
+                gardener = Stage.Away;
+                return;
+            }
             showGarden = settings.Has(SpringEffect.Garden);
             orchard.Advance(seconds, settings);
             foreach (Bloom bloom in garden) bloom.Grow = Math.Min(1, bloom.Grow + bloom.Rate * seconds * scene.Pace);
             int wantButterflies = settings.Has(SpringEffect.Butterflies) ? 3 : 0;
             while (butterflies.Count < wantButterflies) AddButterfly(false);
             while (butterflies.Count > wantButterflies + 3) butterflies.RemoveAt(butterflies.Count - 1);
-            int wantBees = settings.Has(SpringEffect.Bees) ? 2 : 0;
+            int wantBees = settings.Has(SpringEffect.Bees) && daylight > 0.24 ? 2 : 0;
             while (bees.Count < wantBees) bees.Add(NewFlyer(0));
             while (bees.Count > wantBees) bees.RemoveAt(bees.Count - 1);
             foreach (Flyer butterfly in butterflies) MoveButterfly(butterfly, seconds);
@@ -89,6 +106,17 @@ namespace SnowDesk
                 birdsX += birdsDirection * 260 * S * seconds;
                 if (birdsX < -120 * S || birdsX > scene.Width + 120 * S) birds = false;
             }
+        }
+
+        internal static double Sunlight(double hour)
+        {
+            return Math.Max(0, Math.Min(1, Math.Min((hour - 5.3) / 2.3, (20.5 - hour) / 2.8)));
+        }
+
+        private double Openness(Bloom bloom)
+        {
+            double baseOpen = bloom.Kind == 0 ? 0.36 : bloom.Kind == 1 ? 0.13 : 0.21;
+            return (baseOpen + daylight * (1 - baseOpen)) * (1 - scene.Thawing * 0.78);
         }
 
         private Flyer NewFlyer(int tint)
@@ -110,6 +138,7 @@ namespace SnowDesk
         {
             var random = scene.Random;
             flyer.Flower = -1;
+            flyer.Ledge = false;
             double hiveX, hiveY;
             if (flowersOnly && random.NextDouble() < 0.35 && orchard.HiveEntrance(out hiveX, out hiveY))
             {
@@ -122,7 +151,7 @@ namespace SnowDesk
             if (showGarden && garden.Count > 0 && (flowersOnly || random.NextDouble() < 0.6))
             {
                 int pick = random.Next(garden.Count);
-                if (garden[pick].Grow > 0.6)
+                if (garden[pick].Grow > 0.6 && Openness(garden[pick]) > 0.42)
                 {
                     flyer.Flower = pick;
                     flyer.TargetX = garden[pick].X;
@@ -131,6 +160,13 @@ namespace SnowDesk
                 }
             }
             flyer.TargetX = random.NextDouble() * scene.Width;
+            double perch;
+            if (!flowersOnly && random.NextDouble() < 0.19 && scene.TryPerch(flyer.TargetX, out perch))
+            {
+                flyer.TargetY = perch;
+                flyer.Ledge = true;
+                return;
+            }
             flyer.TargetY = scene.Ground - (50 + random.NextDouble() * 220) * S;
         }
 
@@ -149,6 +185,7 @@ namespace SnowDesk
                 // The cursor startles it: off it goes, away from the pointer.
                 flyer.Rest = 0;
                 flyer.Flower = -1;
+                flyer.Ledge = false;
                 flyer.TargetX = Clamp(flyer.X + fleeX / Math.Max(1, near) * 240 * S, 0, scene.Width);
                 flyer.TargetY = Clamp(flyer.Y + fleeY / Math.Max(1, near) * 160 * S - 80 * S, scene.Ground - 320 * S, scene.Ground - 30 * S);
             }
@@ -156,6 +193,12 @@ namespace SnowDesk
             {
                 flyer.Rest -= dt;
                 if (flyer.Flower >= 0) flyer.Y = FlowerTop(garden[flyer.Flower]);
+                double perch;
+                if (flyer.Ledge)
+                {
+                    if (!scene.TryPerch(flyer.X, out perch) || Math.Abs(perch - flyer.Y) > 8 * S) flyer.Rest = 0;
+                    else flyer.Y = perch;
+                }
                 if (flyer.Rest <= 0) ChooseTarget(flyer, false);
                 return;
             }
@@ -163,7 +206,7 @@ namespace SnowDesk
             double distance = Math.Sqrt(dx * dx + dy * dy);
             if (distance < 4 * S)
             {
-                if (flyer.Flower >= 0) flyer.Rest = 2 + scene.Random.NextDouble() * 3;
+                if (flyer.Flower >= 0 || flyer.Ledge) flyer.Rest = 2 + scene.Random.NextDouble() * 3;
                 else ChooseTarget(flyer, false);
                 return;
             }
@@ -253,7 +296,7 @@ namespace SnowDesk
                 Bloom b = bloom;
                 double bend = sway + Math.Sin(clock * 1.3 + b.Seed) * 0.4;
                 canvas.DrawArt(b.X + 9 * S, scene.Ground, S, false, g => SeasonArt.Grass(g, b.Seed, bend * 3));
-                canvas.DrawArt(b.X, scene.Ground, S, false, g => SeasonArt.Flower(g, b.Kind, b.Tint, b.Grow, bend));
+                canvas.DrawArt(b.X, scene.Ground, S, false, g => SeasonArt.Flower(g, b.Kind, b.Tint, b.Grow, bend, Openness(b)));
             }
         }
 

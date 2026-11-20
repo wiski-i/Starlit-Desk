@@ -483,6 +483,7 @@ namespace SnowDesk
         private DesktopTheme previewTheme;
         private Settings previewSettings;
         private bool previewPlaying;
+        private int previewLook = -1;
 
         internal DeskThemePreview()
         {
@@ -495,10 +496,12 @@ namespace SnowDesk
             previewClock.Tick += AdvancePreview;
         }
 
-        internal void SetPreview(Settings settings, bool playing)
+        internal void SetPreview(Settings settings, bool playing, bool economy)
         {
             previewSettings = settings;
-            DesktopTheme theme = settings.Theme;
+            int interval = economy ? 64 : 40;
+            if (previewClock.Interval != interval) previewClock.Interval = interval;
+            DesktopTheme theme = settings.ThemeFor("", DateTime.Today);
             if (theme != previewTheme)
             {
                 previewClock.Stop();
@@ -507,6 +510,13 @@ namespace SnowDesk
                 previewTheme = theme;
                 Invalidate();
             }
+            if (theme == DesktopTheme.Space && preview != null && previewLook != settings.SpaceLook)
+            {
+                previewLook = settings.SpaceLook;
+                preview.Advance(1.0 / 60, settings);
+                Invalidate();
+            }
+            else if (theme != DesktopTheme.Space) previewLook = -1;
             previewPlaying = playing;
             UpdatePreviewPlayback();
         }

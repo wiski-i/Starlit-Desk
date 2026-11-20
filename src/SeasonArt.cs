@@ -28,6 +28,9 @@ namespace SnowDesk
             Unit(Color.FromArgb(255, 252, 252), Color.FromArgb(234, 212, 222))
         };
         private static readonly Brush[] SpringBack = { Solid(226, 160, 186), Solid(236, 196, 212), Solid(226, 214, 220) };
+        private static readonly Brush WetVeil = SnowField.Brush(95, 65, 38, 36);
+        private static readonly Brush FarLeaf = SnowField.Brush(155, 193, 147, 102);
+        private static readonly Brush FarPetal = SnowField.Brush(151, 242, 208, 223);
         private static readonly Pen LeafVein = UnitPen(Color.FromArgb(120, 70, 30, 20), 0.045f);
         private static readonly Pen LeafEdge = UnitPen(Color.FromArgb(90, 60, 26, 18), 0.04f);
         private static readonly Pen PetalVein = UnitPen(Color.FromArgb(70, 200, 100, 140), 0.04f);
@@ -53,7 +56,7 @@ namespace SnowDesk
         /// width narrows as it turns and the back face shows when negative. Resting pieces are foreshortened.
         /// </summary>
         internal static void Piece(Graphics g, Season season, byte kind, byte tint, float size, float angle, float flip,
-            float x, float y, bool resting)
+            float x, float y, bool resting, bool wet = false, bool far = false)
         {
             bool autumn = season == Season.Autumn;
             GraphicsPath[] shapes = autumn ? AutumnShapes : SpringShapes;
@@ -65,7 +68,9 @@ namespace SnowDesk
             g.RotateTransform(angle);
             g.ScaleTransform(Math.Max(0.3f, Math.Abs(flip)) * size, size);
             GraphicsPath shape = shapes[kind % shapes.Length];
-            g.FillPath(flip < 0 ? back[tint % back.Length] : front[tint % front.Length], shape);
+            g.FillPath(far ? (autumn ? FarLeaf : FarPetal) :
+                flip < 0 ? back[tint % back.Length] : front[tint % front.Length], shape);
+            if (wet) g.FillPath(WetVeil, shape);
             if (autumn)
             {
                 g.DrawPath(LeafEdge, shape);
@@ -151,7 +156,7 @@ namespace SnowDesk
         }
 
         /// <summary>A flower on (0, 0); kind 0 tulip, 1 daisy, 2 crocus. <paramref name="grow"/> 0..1 from sprout to bloom.</summary>
-        internal static void Flower(Graphics g, int kind, int tint, double grow, double sway)
+        internal static void Flower(Graphics g, int kind, int tint, double grow, double sway, double daylight = 1)
         {
             float stemTop = -(float)(8 + 30 * grow) * (kind == 2 ? 0.55f : 1);
             float tipX = (float)sway * (float)grow * 4;
@@ -170,7 +175,7 @@ namespace SnowDesk
                 g.FillEllipse(LeafGreen, tipX - 2, stemTop - 5, 4, 6);
                 return;
             }
-            double open = Math.Min(1, (grow - 0.45) / 0.45);
+            double open = Math.Min(1, (grow - 0.45) / 0.45) * daylight;
             g.TranslateTransform(tipX, stemTop);
             if (kind == 1) Daisy(g, open);
             else Cup(g, TulipFill[tint % TulipFill.Length], open, kind == 2 ? 0.75f : 1);

@@ -15,6 +15,13 @@ namespace SnowDesk
         private IntPtr raisedPopup;
         private bool wasOnDesktop;
         private TreeTarget treeTarget;
+        private DesktopTheme nextTheme;
+        private double transition;
+        internal DesktopTheme Theme { get; private set; }
+        internal Settings Options { get; set; }
+        internal bool Active { get; set; }
+        internal DesktopScene Routed { get; set; }
+        internal readonly IconDust Dust = new IconDust();
 
         internal DesktopScene Scene { get; private set; }
         internal SnowField Snow { get { return Scene as SnowField; } }
@@ -25,7 +32,39 @@ namespace SnowDesk
         internal Overlay(Forms.Screen display, DesktopTheme theme)
         {
             screen = display;
+            Theme = theme;
             Scene = theme.CreateScene(display);
+        }
+
+        internal void RequestTheme(DesktopTheme theme)
+        {
+            if (theme == (nextTheme ?? Theme)) return;
+            if (theme == Theme) { nextTheme = null; return; }
+            nextTheme = theme;
+            if (IsVisible) return;
+            SwapTheme();
+            transition = 0;
+        }
+
+        private void SwapTheme()
+        {
+            var winter = Snow;
+            var incoming = nextTheme.CreateScene(screen);
+            var spring = incoming as SeasonScene;
+            if (winter != null && spring != null && nextTheme == DesktopTheme.Spring) spring.BeginThaw(winter.ThawPatches());
+            if (treeTarget != null) { treeTarget.Dispose(); treeTarget = null; }
+            Scene.Dispose();
+            Scene = incoming;
+            Theme = nextTheme;
+            nextTheme = null;
+        }
+
+        internal bool AdvanceTransition(double seconds)
+        {
+            transition = Math.Max(0, Math.Min(1, transition + seconds * (nextTheme == null ? -0.95 : 1.9)));
+            if (nextTheme == null || transition < 1) return false;
+            SwapTheme();
+            return true;
         }
 
         internal void Reveal(FrameSurface frame, Region dashboard)
@@ -60,6 +99,7 @@ namespace SnowDesk
             if (!IsVisible) return;
             ShowWindow(window, 0);
             IsVisible = false;
+            if (nextTheme != null) { SwapTheme(); transition = 0; }
         }
 
         internal void Close()
@@ -115,11 +155,13 @@ namespace SnowDesk
             frame.Canvas.BeginFrame(bounds.Width, bounds.Height);
             if (dashboard != null) frame.Canvas.Exclude(dashboard, -bounds.X, -bounds.Y);
             Scene.Draw(frame.Canvas);
+            if (Options != null && Theme != DesktopTheme.Space && Options.IconDust && Options.Accumulation != 0)
+                Dust.Draw(frame.Canvas, bounds, Theme);
             frame.Canvas.Flush();
             var destination = new Desktop.Point { X = bounds.X, Y = bounds.Y };
             var extent = new Desktop.Point { X = bounds.Width, Y = bounds.Height };
             var source = new Desktop.Point();
-            var blend = new Blend { Opacity = 255, AlphaFormat = 1 };
+            var blend = new Blend { Opacity = (byte)Math.Round(255 * (1 - transition)), AlphaFormat = 1 };
             if (!UpdateLayeredWindow(window, IntPtr.Zero, ref destination, ref extent, frame.DeviceContext, ref source,
                 0, ref blend, 2))
                 throw new Win32Exception(Marshal.GetLastWin32Error());

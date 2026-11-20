@@ -38,6 +38,8 @@ namespace SnowDesk
         private static extern bool IsWindowVisible(IntPtr hwnd);
         [DllImport("user32.dll")]
         private static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetWindow(IntPtr hwnd, uint relationship);
 
         internal static bool IsTopLevel(IntPtr hwnd)
         {
@@ -146,23 +148,28 @@ namespace SnowDesk
                 bool taskbar = ShellSurfaces.IsTaskbar(name);
                 bool overflow = ShellSurfaces.IsOverflow(name);
                 bool start = !taskbar && !overflow && ShellSurfaces.IsStart(hwnd, name, hwnd == foreground);
-                bool nativeMenu = name == "#32768";
-                bool toolPopup = false, wpfLayered = false;
-                const int ToolWindow = 0x80, Transparent = 0x20, Layered = 0x80000, Caption = 0x00C00000;
+                bool nativeMenu = name == "#32768" || name == "ComboLBox";
+                bool flyout = ShellSurfaces.IsFlyout(hwnd, name);
+                bool toolPopup = flyout, wpfLayered = false, glassOverlay = false;
+                const int ToolWindow = 0x80, Transparent = 0x20, Layered = 0x80000, Caption = 0x00C00000, NoActivate = 0x08000000;
                 const int Popup = unchecked((int)0x80000000);
-                if (!taskbar && !overflow && !start && !nativeMenu)
+                if (!taskbar && !overflow && !start && !nativeMenu && !flyout)
                 {
                     int extended = GetWindowLong(hwnd, -20);
                     wpfLayered = (extended & (Layered | Transparent)) == Layered &&
                         name.StartsWith("HwndWrapper[", StringComparison.Ordinal) && (GetWindowLong(hwnd, -16) & Caption) == 0;
-                    if ((extended & ToolWindow) != 0 || wpfLayered)
+                    int style = GetWindowLong(hwnd, -16);
+                    bool captionlessPopup = (style & (Popup | Caption)) == Popup;
+                    bool layeredPopup = (extended & (Layered | Transparent)) == Layered && captionlessPopup;
+                    bool ownedPopup = captionlessPopup && GetWindow(hwnd, 4) != IntPtr.Zero;
+                    if ((extended & ToolWindow) != 0 || wpfLayered || layeredPopup || ownedPopup)
                     {
-                        int style = GetWindowLong(hwnd, -16);
                         uint ownerProcess;
                         GetWindowThreadProcessId(hwnd, out ownerProcess);
                         toolPopup = (wpfLayered || (style & (Popup | Caption)) == Popup) && (extended & Transparent) == 0 &&
                             ownerProcess != ownProcess && name != "tooltips_class32" && name != "SysShadow";
                         if (!toolPopup) return false;
+                        glassOverlay = (extended & (ToolWindow | Layered | NoActivate)) == (ToolWindow | Layered | NoActivate);
                     }
                 }
                 if (result.Exists(item => item.Handle == hwnd)) return false;
@@ -176,11 +183,15 @@ namespace SnowDesk
                     rect = ShellSurfaces.StartBounds(hwnd, rect, shellChanged, WindowScale(hwnd));
                 }
                 else if (!region.IsEmpty && region != rect) rect = region;
-                else if (overflow) rect = ShellSurfaces.OverflowPanel(rect, name, WindowScale(hwnd));
+                else if (overflow) rect = PopupSurfaces.Resolve(hwnd, rect, WindowScale(hwnd), false, shellChanged,
+                    ShellSurfaces.OverflowPanel(rect, name, WindowScale(hwnd)));
                 else if (nativeMenu) rect = MenuClientBounds(hwnd, rect, WindowScale(hwnd));
                 else if (toolPopup) rect = PopupSurfaces.Resolve(hwnd, rect, WindowScale(hwnd), wpfLayered, shellChanged);
                 bool popup = start || overflow || nativeMenu || toolPopup;
                 if (rect.IsEmpty || rect.Width < (popup ? 32 : 70) || rect.Height < (popup || taskbar ? 18 : 35)) return false;
+                // A layered, non-activating tool window spanning a whole monitor is an invisible overlay
+                // (NVIDIA, capture and FPS counters), not a surface: it must not hide or catch the effects.
+                if (glassOverlay && CoversMonitor(rect)) return false;
                 double radius = taskbar ? 0 : EstimateCornerRadius(hwnd);
                 if (wpfLayered && rect != frame) radius = Math.Max(radius, 5 * WindowScale(hwnd));
                 var window = new WindowBounds
@@ -224,6 +235,13 @@ namespace SnowDesk
             return result;
         }
 
+        private static bool CoversMonitor(Rect rect)
+        {
+            var monitor = Forms.Screen.FromRectangle(new System.Drawing.Rectangle((int)rect.X, (int)rect.Y,
+                (int)Math.Max(1, rect.Width), (int)Math.Max(1, rect.Height))).Bounds;
+            return rect.Width >= monitor.Width * 0.95 && rect.Height >= monitor.Height * 0.9;
+        }
+
         internal static bool DesktopHasFocus(IntPtr foreground)
         {
             if (foreground == IntPtr.Zero) return false;
@@ -260,7 +278,8 @@ namespace SnowDesk
             if (bounds.IsEmpty || bounds.Left > screen.Left + 2 || bounds.Top > screen.Top + 2 ||
                 bounds.Right < screen.Right - 2 || bounds.Bottom < screen.Bottom - 2) return false;
             string name = ClassName(hwnd, new StringBuilder(260));
-            return !ShellSurfaces.IsTaskbar(name) && !ShellSurfaces.IsOverflow(name) && !ShellSurfaces.IsStart(hwnd, name, true);
+            return !ShellSurfaces.IsTaskbar(name) && !ShellSurfaces.IsOverflow(name) &&
+                !ShellSurfaces.IsFlyout(hwnd, name) && !ShellSurfaces.IsStart(hwnd, name, true);
         }
 
         internal static string FullscreenScreen()

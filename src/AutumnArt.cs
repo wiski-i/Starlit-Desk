@@ -60,6 +60,13 @@ namespace SnowDesk
             Leg(g, DenimFar, -stride * 8, raking ? -3 : 0);
             Leg(g, Denim, stride * 8, raking ? 4 : 0);
             float stroke = raking ? (float)Math.Sin(phase * 2.4) : 0;
+            GraphicsState posture = g.Save();
+            if (raking)
+            {
+                g.TranslateTransform(0, -28);
+                g.RotateTransform(6 * stroke + 3);
+                g.TranslateTransform(0, 28);
+            }
             if (!raking) SummerArt.Taper(g, FlannelFar, 4.6f, 3.6f, new PointF(-2, -52), new PointF(-5 - stride * 4, -42), new PointF(-3, -36));
             g.FillPath(Flannel, Shirt);
             GraphicsState state = g.Save();
@@ -87,6 +94,7 @@ namespace SnowDesk
                 g.FillEllipse(Skin, 8.8f, -38.8f, 3.6f, 3.6f);
             }
             Head(g, 1, -63, raking);
+            g.Restore(posture);
         }
 
         private static void RakeHead(Graphics g, float x, float y, float angle)

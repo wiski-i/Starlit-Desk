@@ -20,8 +20,9 @@ namespace SnowDesk
         /// <summary>One resting piece; Offset is from the ledge's left edge, Lift is its height above the ledge.</summary>
         internal struct Piece
         {
-            internal float Offset, Lift, Angle, Size;
+            internal float Offset, Lift, Angle, Size, Weight;
             internal byte Kind, Tint;
+            internal bool Wet;
         }
 
         internal delegate void Painter(Graphics g, Piece piece, float x, float y);
@@ -34,8 +35,10 @@ namespace SnowDesk
         private Bitmap cache;
         private Graphics cacheGraphics;
         private bool dirty = true;
+        private SurfaceRim rim;
 
         internal readonly IntPtr Handle;
+        internal WindowMotion Motion;
         internal Rect Window { get; private set; }
         internal double X { get; private set; }
         internal double Y { get; private set; }
@@ -65,7 +68,14 @@ namespace SnowDesk
         internal double SurfaceAt(double x)
         {
             int cell = Math.Max(0, Math.Min(height.Length - 1, IndexAt(x)));
-            return height.Length == 0 ? Y : Y - height[cell];
+            return height.Length == 0 ? Y : Y + rim.At(x - X) - height[cell];
+        }
+
+        internal void SetRim(double radius, double left, double right)
+        {
+            if (rim.Radius == radius && rim.Left == left && rim.Right == right) return;
+            rim = new SurfaceRim { Radius = radius, Left = left, Right = right };
+            dirty = true;
         }
 
         internal void Place(Rect window, double x, double y, double width)
@@ -84,18 +94,19 @@ namespace SnowDesk
         }
 
         /// <summary>Lays a piece down at x; false when that stretch is hidden behind another window.</summary>
-        internal bool Rest(double x, byte kind, byte tint, float size, float angle)
+        internal bool Rest(double x, byte kind, byte tint, float size, float angle, bool wet = false, double density = 1)
         {
             int cell = IndexAt(x);
             if (cell < 0 || cell >= height.Length || !Visible[cell]) return false;
             var piece = new Piece
             {
-                Offset = (float)(x - X), Lift = height[cell] + size * 0.12f, Angle = angle, Size = size, Kind = kind, Tint = tint
+                Offset = (float)(x - X), Lift = height[cell] + size * 0.12f, Angle = angle,
+                Size = size, Weight = (float)Math.Max(0.65, density), Kind = kind, Tint = tint, Wet = wet
             };
-            Raise(cell, size);
+            Raise(cell, size * piece.Weight);
             pieces.Add(piece);
             if (pieces.Count > height.Length * perCell) pieces.RemoveAt(0); // The oldest, lowest piece stays painted until the next repaint.
-            if (!dirty && cacheGraphics != null) paint(cacheGraphics, piece, piece.Offset + Pad, maxHeight + Pad - piece.Lift);
+            if (!dirty && cacheGraphics != null) PaintResting(piece);
             return true;
         }
 
@@ -111,18 +122,20 @@ namespace SnowDesk
         /// Lifts pieces whose offset lies in [left, right) with the given chance (topmost first) and reports each
         /// visible one as (x, y, piece). Hidden pieces leave unseen. Returns how many were lifted.
         /// </summary>
-        internal int Lift(double left, double right, double chance, Random random, Action<double, double, Piece> emit)
+        internal int Lift(double left, double right, double chance, Random random, Action<double, double, Piece> emit,
+            double force = 1)
         {
             int lifted = 0;
             for (int i = pieces.Count - 1; i >= 0; i--)
             {
                 Piece piece = pieces[i];
                 double x = X + piece.Offset;
-                if (x < left || x >= right || random.NextDouble() >= chance) continue;
+                double release = piece.Wet && chance < 1 ? chance * (0.16 + 0.84 * force) : chance;
+                if (x < left || x >= right || random.NextDouble() >= release) continue;
                 pieces.RemoveAt(i);
                 lifted++;
                 int cell = Math.Max(0, Math.Min(Visible.Length - 1, (int)(piece.Offset / Cell)));
-                if (emit != null && Visible[cell]) emit(x, Y - piece.Lift, piece);
+                if (emit != null && Visible[cell]) emit(x, Y + rim.At(piece.Offset) - piece.Lift, piece);
             }
             if (lifted > 0)
             {
@@ -130,6 +143,18 @@ namespace SnowDesk
                 dirty = true;
             }
             return lifted;
+        }
+
+        internal void Dry()
+        {
+            for (int i = 0; i < pieces.Count; i++)
+            {
+                Piece piece = pieces[i];
+                if (!piece.Wet) continue;
+                piece.Wet = false;
+                pieces[i] = piece;
+                dirty = true;
+            }
         }
 
         /// <summary>Number of pieces lying between left and right.</summary>
@@ -147,10 +172,13 @@ namespace SnowDesk
         private void Recount()
         {
             Array.Clear(height, 0, height.Length);
-            foreach (Piece piece in pieces)
+            for (int index = 0; index < pieces.Count; index++)
             {
+                Piece piece = pieces[index];
                 int cell = Math.Max(0, Math.Min(height.Length - 1, (int)(piece.Offset / Cell)));
-                Raise(cell, piece.Size);
+                piece.Lift = height[cell] + piece.Size * 0.12f;
+                pieces[index] = piece;
+                Raise(cell, piece.Size * piece.Weight);
             }
         }
 
@@ -172,7 +200,7 @@ namespace SnowDesk
                         if (visible || start < 0) continue;
                         float left = (float)(X + start * Cell), right = (float)Math.Min(X + Width, X + cell * Cell);
                         shown.Union(new RectangleF(left - (start == 0 ? Pad : 0), (float)(Y - maxHeight - Pad),
-                            right - left + (start == 0 ? Pad : 0) + (cell == Visible.Length ? Pad : 0), maxHeight + Pad * 2));
+                            right - left + (start == 0 ? Pad : 0) + (cell == Visible.Length ? Pad : 0), maxHeight + Pad * 2 + (float)rim.Radius));
                         start = -1;
                     }
                     g.IntersectClip(shown);
@@ -184,7 +212,7 @@ namespace SnowDesk
 
         private void Repaint()
         {
-            int width = (int)Math.Ceiling(Width) + Pad * 2, tall = (int)Math.Ceiling(maxHeight) + Pad * 2;
+            int width = (int)Math.Ceiling(Width) + Pad * 2, tall = (int)Math.Ceiling(maxHeight + rim.Radius) + Pad * 2;
             if (cache == null || cache.Width != width || cache.Height != tall)
             {
                 DropCache();
@@ -194,8 +222,13 @@ namespace SnowDesk
                 cacheGraphics.PixelOffsetMode = PixelOffsetMode.Half;
             }
             cacheGraphics.Clear(Color.Transparent);
-            foreach (Piece piece in pieces) paint(cacheGraphics, piece, piece.Offset + Pad, maxHeight + Pad - piece.Lift);
+            foreach (Piece piece in pieces) PaintResting(piece);
             dirty = false;
+        }
+
+        private void PaintResting(Piece piece)
+        {
+            paint(cacheGraphics, piece, piece.Offset + Pad, maxHeight + Pad - piece.Lift + (float)rim.At(piece.Offset));
         }
 
         private void DropCache()

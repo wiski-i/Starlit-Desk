@@ -10,7 +10,7 @@ using Forms = System.Windows.Forms;
 [assembly: System.Reflection.AssemblyTitle("Starlit Desk")]
 [assembly: System.Reflection.AssemblyProduct("Starlit Desk")]
 [assembly: System.Reflection.AssemblyDescription("Offline desktop effects for Windows")]
-[assembly: System.Reflection.AssemblyVersion("1.11.0.0")]
+[assembly: System.Reflection.AssemblyVersion("1.13.0.0")]
 
 namespace SnowDesk
 {
@@ -25,6 +25,16 @@ namespace SnowDesk
         private readonly Stopwatch animation = new Stopwatch();
         private readonly FrameClock frameClock;
         private readonly Forms.Timer windowsTimer;
+        private readonly Forms.Timer profileTimer;
+        private readonly DesktopIcons desktopIcons = new DesktopIcons();
+        private List<Desktop.WindowBounds> sceneGeometry = new List<Desktop.WindowBounds>();
+        private static readonly List<Desktop.WindowBounds> NoGeometry = new List<Desktop.WindowBounds>();
+        private readonly List<ScreenTransfer> transfers = new List<ScreenTransfer>(48);
+        private IntPtr lastForeground;
+        private string foregroundApp = "", pausedScreen, quietScreen;
+        private DateTime calendarDate;
+        private bool onBattery;
+        private int effectiveRate;
         private readonly Forms.Control uiThread = new Forms.Control();
         private readonly Desktop.EventHandler windowsChanged;
         private readonly Forms.NotifyIcon tray;
@@ -69,9 +79,12 @@ namespace SnowDesk
         internal Program(Settings preferences = null)
         {
             settings = preferences ?? Settings.Load();
+            effectiveRate = settings.Rate;
             frameClock = new FrameClock(RunOnUiThread, Render, settings.Rate);
             windowsTimer = new Forms.Timer { Interval = 100 };
             windowsTimer.Tick += RefreshDesktop;
+            profileTimer = new Forms.Timer { Interval = 15000 };
+            profileTimer.Tick += delegate { UpdateEnvironment(); };
             windowsChanged = OnWindowEvent;
             icon = Drawing.Icon.ExtractAssociatedIcon(Forms.Application.ExecutablePath) ??
                 (Drawing.Icon)Drawing.SystemIcons.Application.Clone();
@@ -93,6 +106,9 @@ namespace SnowDesk
             uiThread.CreateControl();
             SystemEvents.DisplaySettingsChanged += DisplayChanged;
             SystemEvents.SessionSwitch += SessionChanged;
+            SystemEvents.PowerModeChanged += PowerChanged;
+            UpdateEnvironment();
+            profileTimer.Start();
             RebuildDisplays();
             SetHooks();
             if (showDashboard) ShowDashboard();
@@ -105,6 +121,8 @@ namespace SnowDesk
                 closing = true;
                 SystemEvents.DisplaySettingsChanged -= DisplayChanged;
                 SystemEvents.SessionSwitch -= SessionChanged;
+                SystemEvents.PowerModeChanged -= PowerChanged;
+                profileTimer.Dispose();
                 StopHooks();
                 frameClock.Dispose();
                 windowsTimer.Dispose();
@@ -125,6 +143,7 @@ namespace SnowDesk
             if (winEventHooks.Count != 0) return;
             WatchWindows(0x0003, 0x0003); // Foreground.
             WatchWindows(0x0006, 0x0007); // Menu popups.
+            WatchWindows(0x000A, 0x000B); // Move/size start and stop.
             WatchWindows(0x0016, 0x0017); // Minimize start/end.
             WatchWindows(0x8000, 0x8003); // Create, destroy, show, hide.
             WatchWindows(0x8005, 0x8005); // Accessibility focus.
@@ -207,7 +226,10 @@ namespace SnowDesk
         {
             CloseDisplays();
             foreach (Forms.Screen screen in Forms.Screen.AllScreens)
-                overlays.Add(new Overlay(screen, settings.Theme));
+            {
+                var overlay = new Overlay(screen, settings.ThemeFor(screen.DeviceName, DateTime.Today));
+                overlays.Add(overlay);
+            }
             RefreshDesktop(null, EventArgs.Empty);
             SyncDashboard();
         }
@@ -227,12 +249,18 @@ namespace SnowDesk
             geometryDirty = false;
             bool active = running && !sessionLocked;
             string fullscreen = active ? Desktop.FullscreenScreen() : null;
-            bool onDesktop = active && Desktop.DesktopHasFocus(Desktop.GetForegroundWindow());
+            IntPtr foreground = active ? Desktop.GetForegroundWindow() : IntPtr.Zero;
+            bool onDesktop = active && Desktop.DesktopHasFocus(foreground);
+            ApplyForegroundRules(foreground);
+            ApplyProfiles();
+            if (active && settings.IconDust) desktopIcons.Refresh(onDesktop, ShellChanged);
 
             var size = new Drawing.Size();
             foreach (Overlay overlay in overlays)
             {
-                if (!active || overlay.DisplayName == fullscreen || !settings.ShowsOn(overlay.DisplayName))
+                overlay.Active = active && overlay.DisplayName != fullscreen && overlay.DisplayName != pausedScreen &&
+                    settings.ShowsOn(overlay.DisplayName);
+                if (!overlay.Active)
                 {
                     if (overlay.IsVisible) overlay.Scene.ResetPointer();
                     overlay.Close();
@@ -257,17 +285,19 @@ namespace SnowDesk
             }
 
             Drawing.Rectangle dashboardBounds = DashboardBounds();
-            bool needsGeometry = overlays.Exists(item => item.Scene.UsesWindowGeometry(settings));
-            var windows = needsGeometry || !dashboardBounds.IsEmpty ?
+            bool needsGeometry = overlays.Exists(item => item.Active && item.Scene.UsesWindowGeometry(item.Options));
+            var windows = needsGeometry || settings.IconDust || !dashboardBounds.IsEmpty ?
                 Desktop.ReadWindows(ShellChanged, shellFocus) : new List<Desktop.WindowBounds>();
-            var geometry = needsGeometry ? windows : new List<Desktop.WindowBounds>();
+            sceneGeometry = windows;
             UpdateShield(windows, dashboardBounds);
             foreach (Overlay overlay in overlays)
             {
-                if (overlay.DisplayName == fullscreen || !settings.ShowsOn(overlay.DisplayName)) continue;
-                overlay.Scene.UpdateLedges(geometry);
+                if (!overlay.Active) continue;
+                AttachTravel(overlay);
+                UpdateSceneGeometry(overlay);
+                if (settings.IconDust) overlay.Dust.Update(desktopIcons.Bounds, windows, overlay.Bounds, onDesktop);
                 overlay.Reveal(frameSurface, dashboardShield);
-                var popup = geometry.Find(item => item.IsShellPopup && overlay.Contains(new Desktop.Point
+                var popup = windows.Find(item => item.IsShellPopup && overlay.Contains(new Desktop.Point
                 {
                     X = (int)(item.Bounds.Left + item.Bounds.Width * 0.5), Y = (int)item.Bounds.Top
                 }));
@@ -304,13 +334,54 @@ namespace SnowDesk
             foreach (Overlay overlay in overlays)
             {
                 if (!overlay.IsVisible) continue;
+                if (overlay.AdvanceTransition(elapsed))
+                {
+                    AttachTravel(overlay);
+                    UpdateSceneGeometry(overlay);
+                }
                 SnowField snow = overlay.Snow;
                 if (snow != null && snow.IsHoldingTree)
                     snow.DragTree(cursor, elapsed, Desktop.PrimaryButtonDown());
-                overlay.Scene.Advance(elapsed, settings, cursor);
+                overlay.Scene.Advance(elapsed, overlay.Options, cursor);
+                if (settings.IconDust) overlay.Dust.Advance(elapsed);
+            }
+            foreach (ScreenTransfer transfer in transfers) transfer.Target.Receive(transfer.Particle);
+            transfers.Clear();
+            if (settings.IconDust && Desktop.PrimaryButtonDown() && Desktop.DesktopHasFocus(Desktop.GetForegroundWindow()))
+                desktopIcons.Refresh(true, ShellChanged);
+            foreach (Overlay overlay in overlays)
+            {
+                if (!overlay.IsVisible) continue;
                 overlay.RenderFrame(frameSurface, dashboardShield);
                 overlay.UpdateTreeTarget(dashboardBounds);
             }
+        }
+
+        private void AttachTravel(Overlay overlay)
+        {
+            if (overlay.Routed == overlay.Scene) return;
+            overlay.Routed = overlay.Scene;
+            var travel = overlay.Scene as TravelingScene;
+            if (travel != null) travel.Send = particle => SendAcross(overlay, particle);
+        }
+
+        private void UpdateSceneGeometry(Overlay overlay)
+        {
+            overlay.Scene.UpdateLedges(overlay.Scene.UsesWindowGeometry(overlay.Options) ? sceneGeometry : NoGeometry);
+        }
+
+        private bool SendAcross(Overlay origin, TravelingParticle particle)
+        {
+            if (transfers.Count >= 160) return false;
+            foreach (Overlay target in overlays)
+            {
+                if (target == origin || !target.Active || target.Theme != origin.Theme) continue;
+                var receiving = target.Scene as TravelingScene;
+                if (receiving == null || !ScreenTransfer.Between(origin.Bounds, target.Bounds, ref particle)) continue;
+                transfers.Add(new ScreenTransfer { Target = receiving, Particle = particle });
+                return true;
+            }
+            return false;
         }
 
         /// <summary>
@@ -352,6 +423,7 @@ namespace SnowDesk
 
         internal Settings Preferences { get { return settings; } }
         internal bool IsRunning { get { return running; } }
+        internal bool BatteryProfileActive { get { return settings.BatterySaver && onBattery; } }
 
         internal void ShowDashboard()
         {
@@ -370,10 +442,70 @@ namespace SnowDesk
 
         internal void SelectTheme(DesktopTheme theme)
         {
-            if (theme == settings.Theme) return;
+            if (theme == settings.Theme && settings.CalendarMode == 0) return;
+            settings.CalendarMode = 0;
             settings.Theme = theme;
-            PopupSurfaces.Clear();
-            RebuildDisplays();
+            SaveSettings();
+        }
+
+        private void PowerChanged(object sender, PowerModeChangedEventArgs e)
+        {
+            RunOnUiThread(UpdateEnvironment);
+        }
+
+        private void UpdateEnvironment()
+        {
+            bool battery = Forms.SystemInformation.PowerStatus.PowerLineStatus == Forms.PowerLineStatus.Offline;
+            DateTime today = DateTime.Today;
+            if (battery == onBattery && calendarDate == today) return;
+            onBattery = battery;
+            calendarDate = today;
+            if (overlays.Count != 0) RefreshDesktop(null, EventArgs.Empty);
+            SyncDashboard();
+        }
+
+        private static bool MatchesApp(string list, string app)
+        {
+            if (list.Length == 0 || app.Length == 0) return false;
+            return ("|" + list + "|").IndexOf("|" + app + "|", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private void ApplyForegroundRules(IntPtr hwnd)
+        {
+            pausedScreen = quietScreen = null;
+            if (hwnd == IntPtr.Zero || (settings.PausedApps.Length == 0 && settings.QuietApps.Length == 0)) return;
+            if (hwnd != lastForeground)
+            {
+                lastForeground = hwnd;
+                foregroundApp = Path.GetFileNameWithoutExtension(ShellSurfaces.ProcessImagePath(hwnd));
+            }
+            if (MatchesApp(settings.PausedApps, foregroundApp)) pausedScreen = Forms.Screen.FromHandle(hwnd).DeviceName;
+            else if (MatchesApp(settings.QuietApps, foregroundApp)) quietScreen = Forms.Screen.FromHandle(hwnd).DeviceName;
+        }
+
+        private void ApplyProfiles()
+        {
+            bool battery = BatteryProfileActive;
+            int rate = battery ? 20 : settings.Rate;
+            if (effectiveRate != rate) { frameClock.SetRate(rate); effectiveRate = rate; }
+            foreach (Overlay overlay in overlays)
+            {
+                overlay.Options = settings.ForScreen(overlay.DisplayName, battery || overlay.DisplayName == quietScreen);
+                overlay.RequestTheme(settings.ThemeFor(overlay.DisplayName, DateTime.Today));
+            }
+        }
+
+        internal void SetScreenTheme(string device, DesktopTheme theme)
+        {
+            if (theme == null) settings.ScreenThemes.Remove(device);
+            else settings.ScreenThemes[device] = theme;
+            SaveSettings();
+        }
+
+        internal void SetScreenDensity(string device, int density)
+        {
+            if (density < 0) settings.ScreenDensities.Remove(device);
+            else settings.ScreenDensities[device] = density;
             SaveSettings();
         }
 
@@ -401,14 +533,21 @@ namespace SnowDesk
                 settings.CursorSweep = !settings.CursorSweep;
                 SaveSettings();
             });
-            var ledges = new Forms.ToolStripMenuItem("Pencere ve menülerde kar", null, (sender, e) =>
-                SetWindowLedges(!settings.WindowLedges));
+            var ledges = new Forms.ToolStripMenuItem("Pencere ve menülerde kar", null, delegate
+            {
+                if (settings.ThemeFor("", DateTime.Today) == DesktopTheme.Space)
+                {
+                    settings.SpaceOcclusion = !settings.SpaceOcclusion;
+                    SaveSettings();
+                }
+                else SetWindowLedges(!settings.WindowLedges);
+            });
             var startup = new Forms.ToolStripMenuItem("Windows ile başlat", null, (sender, e) => ToggleStartup());
             var themes = new Forms.ToolStripMenuItem("Masaüstü teması") { Available = DesktopTheme.All.Count > 1 };
             foreach (DesktopTheme theme in DesktopTheme.All)
             {
                 var option = new Forms.ToolStripMenuItem(theme.Name, null, (sender, e) => SelectTheme(theme));
-                themes.DropDownOpening += (sender, e) => option.Checked = settings.Theme == theme;
+                themes.DropDownOpening += (sender, e) => option.Checked = settings.ThemeFor("", DateTime.Today) == theme;
                 themes.DropDownItems.Add(option);
             }
             var screens = new Forms.ToolStripMenuItem("Ekranlar");
@@ -439,29 +578,36 @@ namespace SnowDesk
             foreach (SnowAction action in SnowAction.All)
                 manual.DropDownItems.Add(new Forms.ToolStripMenuItem(action.Name, null,
                     (sender, e) => RunSnowAction(action)));
+            var orbitActions = new Forms.ToolStripMenuItem("Uzay efektleri");
+            foreach (SpaceAction action in SpaceAction.All)
+                orbitActions.DropDownItems.Add(new Forms.ToolStripMenuItem(action.Name, null,
+                    (sender, e) => RunSpaceAction(action)));
             menu.Items.AddRange(new Forms.ToolStripItem[]
             {
                 new Forms.ToolStripMenuItem("Kontrol panelini aç", null, (sender, e) => ShowDashboard()),
                 toggle, new Forms.ToolStripSeparator(), themes, screens, density, frameRate, sweep, ledges, wind,
-                decorations, manual, startup,
+                decorations, manual, orbitActions, startup,
                 new Forms.ToolStripSeparator(), new Forms.ToolStripMenuItem("Çıkış", null, (sender, e) => ExitThread())
             });
             menu.Opening += delegate
             {
-                DesktopTheme theme = settings.Theme;
+                DesktopTheme theme = settings.ThemeFor("", DateTime.Today);
                 bool winter = theme == DesktopTheme.Winter;
+                bool space = theme == DesktopTheme.Space;
                 screens.Available = Forms.Screen.AllScreens.Length > 1;
                 decorations.Available = manual.Available = winter;
-                sweep.Available = theme != DesktopTheme.Summer;
-                density.Text = winter ? "Kar yoğunluğu" : theme == DesktopTheme.Summer ? "Yağmur yoğunluğu" :
+                orbitActions.Available = space;
+                wind.Available = !space;
+                density.Text = space ? "Yıldız yoğunluğu" : winter ? "Kar yoğunluğu" : theme == DesktopTheme.Summer ? "Yağmur yoğunluğu" :
                     theme == DesktopTheme.Autumn ? "Yaprak yoğunluğu" : "Çiçek yaprağı yoğunluğu";
-                ledges.Text = winter ? "Pencere ve menülerde kar" : theme == DesktopTheme.Summer ? "Pencerelerde su" :
+                ledges.Text = space ? "Pencerelerin arkasında" : winter ? "Pencere ve menülerde kar" : theme == DesktopTheme.Summer ? "Pencerelerde su" :
                     theme == DesktopTheme.Autumn ? "Pencerelerde yaprak" : "Pencerelerde çiçek yaprağı";
-                sweep.Text = winter ? "İmleçle karı dağıt" : "İmleçle yaprakları savur";
+                sweep.Text = space ? "Kozmik tozu imleçle savur" : winter ? "İmleçle karı dağıt" :
+                    theme == DesktopTheme.Summer ? "İmleçle suyu dağıt" : "İmleçle yaprakları savur";
                 toggle.Text = running ? "Duraklat" : "Devam et";
                 wind.Checked = settings.Wind;
                 sweep.Checked = settings.CursorSweep;
-                ledges.Checked = settings.WindowLedges;
+                ledges.Checked = space ? settings.SpaceOcclusion : settings.WindowLedges;
                 startup.Checked = HasStartup();
             };
             return menu;
@@ -496,39 +642,44 @@ namespace SnowDesk
 
         internal void RunSnowAction(SnowAction action)
         {
-            if (settings.Theme != DesktopTheme.Winter) return;
             if (action == SnowAction.ClearTrees)
             {
-                foreach (Overlay overlay in overlays) action.Apply(overlay.Snow);
+                foreach (Overlay overlay in overlays)
+                    if (overlay.Snow != null) action.Apply(overlay.Snow);
                 return;
             }
 
-            Overlay target = ActionTarget();
+            Overlay target = ActionTarget(item => item.Snow != null);
             if (target != null) action.Apply(target.Snow);
         }
 
         internal void RunSeasonAction(SeasonAction action)
         {
-            if (settings.Theme != DesktopTheme.Autumn && settings.Theme != DesktopTheme.Spring) return;
-            Overlay target = ActionTarget();
+            Overlay target = ActionTarget(item => item.Scene is SeasonScene &&
+                item.Theme == (Array.IndexOf(SeasonAction.Spring, action) >= 0 ? DesktopTheme.Spring : DesktopTheme.Autumn));
             var scene = target == null ? null : target.Scene as SeasonScene;
             if (scene != null) action.Apply(scene);
         }
 
         internal void RunSummerAction(SummerAction action)
         {
-            if (settings.Theme != DesktopTheme.Summer) return;
-            Overlay target = ActionTarget();
+            Overlay target = ActionTarget(item => item.Scene is SummerScene);
             if (target != null) action.Apply((SummerScene)target.Scene);
         }
 
+        internal void RunSpaceAction(SpaceAction action)
+        {
+            Overlay target = ActionTarget(item => item.Scene is SpaceScene);
+            if (target != null) action.Apply((SpaceScene)target.Scene);
+        }
+
         /// <summary>Resumes the scene if needed and returns the visible display under the cursor.</summary>
-        private Overlay ActionTarget()
+        private Overlay ActionTarget(Predicate<Overlay> matches)
         {
             if (!running) ToggleScene();
             Desktop.GetCursorPos(out cursor);
-            return overlays.Find(item => item.IsVisible && item.Contains(cursor)) ??
-                overlays.Find(item => item.IsVisible);
+            return overlays.Find(item => item.IsVisible && matches(item) && item.Contains(cursor)) ??
+                overlays.Find(item => item.IsVisible && matches(item));
         }
 
         internal void SetWindowLedges(bool enabled)
@@ -541,7 +692,7 @@ namespace SnowDesk
         internal void SetFrameRate(int value)
         {
             settings.Rate = value;
-            frameClock.SetRate(value);
+            ApplyProfiles();
         }
 
         private void AddOption(Forms.ToolStripMenuItem group, string title, int value,
@@ -563,7 +714,7 @@ namespace SnowDesk
                 settings.Effects ^= effect;
                 SaveSettings();
             });
-            group.DropDownOpening += (sender, e) => item.Checked = settings.Has(effect);
+            group.DropDownOpening += (sender, e) => item.Checked = (settings.Effects & effect) != 0;
             group.DropDownItems.Add(item);
         }
 
@@ -572,18 +723,24 @@ namespace SnowDesk
             try { settings.Save(); }
             catch (IOException error) { ShowTrayError("Ayarlar kaydedilemedi", error); }
             catch (UnauthorizedAccessException error) { ShowTrayError("Ayarlar kaydedilemedi", error); }
+            if (overlays.Count != 0) RefreshDesktop(null, EventArgs.Empty);
             SyncDashboard();
         }
 
         internal static bool HasStartup()
         {
-            using (RegistryKey key = Registry.CurrentUser.OpenSubKey(StartupKey))
+            try
             {
-                string value = key == null ? null : key.GetValue(StartupValue) as string;
-                string executable = "\"" + Forms.Application.ExecutablePath + "\"";
-                return string.Equals(value, executable, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(value, executable + " --background", StringComparison.OrdinalIgnoreCase);
+                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(StartupKey))
+                {
+                    string value = key == null ? null : key.GetValue(StartupValue) as string;
+                    string executable = "\"" + Forms.Application.ExecutablePath + "\"";
+                    return string.Equals(value, executable, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(value, executable + " --background", StringComparison.OrdinalIgnoreCase);
+                }
             }
+            catch (UnauthorizedAccessException) { return false; }
+            catch (System.Security.SecurityException) { return false; }
         }
 
         internal void ToggleStartup()

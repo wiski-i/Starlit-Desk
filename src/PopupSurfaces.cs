@@ -29,21 +29,22 @@ namespace SnowDesk
             lock (Gate) Probes.Clear();
         }
 
-        internal static Rect Resolve(IntPtr hwnd, Rect frame, double scale, bool wpfLayered, Action invalidate)
+        internal static Rect Resolve(IntPtr hwnd, Rect frame, double scale, bool wpfLayered, Action invalidate,
+            Rect? fallbackBounds = null)
         {
             if (invalidate == null || frame.IsEmpty || frame.Width < 64 || frame.Height < 32 ||
-                frame.Width > 1200 * scale || frame.Height > 860 * scale) return frame;
+                frame.Width > 1200 * scale || frame.Height > 860 * scale) return fallbackBounds ?? frame;
             Probe probe;
             lock (Gate)
             {
                 if (Probes.TryGetValue(hwnd, out probe) && probe.Frame.Size == frame.Size && probe.Scale == scale)
                 {
-                    if (probe.Panel.IsEmpty) return frame;
+                    if (probe.Panel.IsEmpty) return fallbackBounds ?? frame;
                     Rect moved = probe.Panel;
                     moved.Offset(frame.X - probe.Frame.X, frame.Y - probe.Frame.Y);
                     return moved;
                 }
-                if (active >= 2 || (probe == null && Probes.Count >= 24)) return frame;
+                if (active >= 2 || (probe == null && Probes.Count >= 24)) return fallbackBounds ?? frame;
                 probe = new Probe { Frame = frame, Scale = scale };
                 Probes[hwnd] = probe;
                 active++;
@@ -59,7 +60,7 @@ namespace SnowDesk
                 lock (Gate) active--;
                 if (Save(hwnd, probe, panel)) invalidate();
             });
-            return frame;
+            return fallbackBounds ?? frame;
         }
 
         private static bool Save(IntPtr hwnd, Probe probe, Rect panel)

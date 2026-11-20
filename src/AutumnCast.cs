@@ -1,4 +1,5 @@
 using System;
+using System.Drawing;
 
 namespace SnowDesk
 {
@@ -17,9 +18,11 @@ namespace SnowDesk
         private Stage raker = Stage.Away, kid = Stage.Away, sweeper = Stage.Away;
         private double clock, rakeX, rakeDirection = 1, rakeStep, rakeTarget, rakeTime, nextRaker = 30;
         private double heapX, heap, nextKid;
+        private double rakeMark, rakeMarkLife, slumpWait;
         private int heapSeed = 7;
         private double kidX, kidDirection = 1, kidStep, kidJump, kidFrom, kidTarget, kidSit;
         private double sweepX, sweepDirection = 1, sweepStep, sweepTimer, binFill, nextSweeper = 70;
+        private static readonly Pen Trace = new Pen(SnowField.Brush(86, 180, 143, 101), 0.8f);
 
         internal AutumnCast(SeasonScene scene)
         {
@@ -41,6 +44,14 @@ namespace SnowDesk
         {
             clock += seconds * scene.Pace;
             grove.Advance(seconds, settings);
+            if (settings.QuietScene)
+            {
+                raker = kid = sweeper = Stage.Away;
+                rakeMarkLife = 0;
+                return;
+            }
+            rakeMarkLife = Math.Max(0, rakeMarkLife - seconds);
+            slumpWait -= seconds;
             if (settings.Has(AutumnEffect.Raker) && raker == Stage.Away && clock >= nextRaker) CallRaker(false);
             if (settings.Has(AutumnEffect.Kid) && kid == Stage.Away && heap > 0.45 && raker == Stage.Away && clock >= nextKid) CallKid();
             if (settings.Has(AutumnEffect.Sweeper) && sweeper == Stage.Away && clock >= nextSweeper) CallSweeper();
@@ -110,10 +121,26 @@ namespace SnowDesk
                 rakeTime += dt;
                 rakeStep += dt;
                 // Each stroke pulls leaves in reach off the ground and onto the heap in front of him.
-                double reach = 110 * S;
-                int gathered = scene.GroundPile.Lift(rakeX - reach, rakeX + reach, dt * 0.9, scene.Random, null);
-                heap = Math.Min(1, Math.Max(heap, 0.2) + gathered * 0.03);
-                bool empty = scene.GroundPile.CountIn(rakeX - reach, rakeX + reach) < 3;
+                double bite = rakeX + rakeDirection * (32 + Math.Sin(rakeStep * 2.4) * 19) * S;
+                double reach = 73 * S;
+                int gathered = scene.GroundPile.Lift(bite - reach, bite + reach, dt * 1.2, scene.Random, null, 0.83);
+                if (gathered > 0)
+                {
+                    heap = Math.Min(1, heap + gathered * 0.035);
+                    rakeMark = bite;
+                    rakeMarkLife = 4.6;
+                }
+                if (heap > 0.67 && slumpWait <= 0)
+                {
+                    for (int i = 0; i < 2; i++)
+                    {
+                        double x = heapX + (i == 0 ? -1 : 1) * (20 + scene.Random.NextDouble() * 15) * S;
+                        scene.GroundPile.Rest(x, (byte)scene.Random.Next(3), (byte)scene.Random.Next(5), (float)(13 * S), 95 + i * 64);
+                    }
+                    heap -= 0.045;
+                    slumpWait = 0.62 + scene.Random.NextDouble() * 0.48;
+                }
+                bool empty = scene.GroundPile.CountIn(bite - reach, bite + reach) < 3;
                 if (rakeTime > 14 || heap >= 1 || (empty && rakeTime > 4))
                 {
                     raker = Stage.Leaving;
@@ -232,6 +259,14 @@ namespace SnowDesk
         public void DrawFront(Canvas canvas)
         {
             grove.DrawFront(canvas);
+            if (rakeMarkLife > 0)
+            {
+                float span = (float)(18 * S * Math.Min(1, rakeMarkLife / 2.0));
+                canvas.DrawArt(rakeMark, scene.Ground - 0.8, 1, rakeDirection < 0, g =>
+                {
+                    for (int i = 0; i < 3; i++) g.DrawLine(Trace, -span, -i * 1.8f, span * (0.54f + i * 0.16f), -i * 1.8f - 1);
+                });
+            }
             if (heap > 0.01)
             {
                 double amount = heap;

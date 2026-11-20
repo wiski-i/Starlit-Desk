@@ -24,6 +24,7 @@ namespace SnowDesk
         private double frogHop = 1, nextHop = 4;
         private double clock;
         private bool pondVisible = true, duckVisible = true;
+        private double duckShake, duckShakeDelay;
 
         internal SummerCast(SummerScene scene)
         {
@@ -35,6 +36,7 @@ namespace SnowDesk
         internal void OnSunshine()
         {
             if (pump == Stage.Away && scene.Main.Volume > 0.35 && scene.Random.NextDouble() < 0.6) CallPump();
+            duckShakeDelay = scene.Random.NextDouble() < 0.50 ? 2.8 + scene.Random.NextDouble() * 2 : 0;
         }
 
         internal void CallPump()
@@ -66,10 +68,33 @@ namespace SnowDesk
             clock += dt * scene.Pace;
             pondVisible = settings.Has(SummerEffect.Pond);
             duckVisible = settings.Has(SummerEffect.Duck);
+            if (settings.QuietScene)
+            {
+                bather = pump = Stage.Away;
+                runnerActive = false;
+                batherInvited = false;
+                scene.Main.Drain = 0;
+                return;
+            }
+            if (duckShakeDelay > 0)
+            {
+                duckShakeDelay -= dt;
+                if (duckShakeDelay <= 0 && duckVisible && !scene.Raining && scene.Main.Volume > 0.31)
+                {
+                    duckShake = 0.64;
+                    scene.Splash(DuckX(), scene.Ground - scene.Main.Depth(S), 5, 0.53);
+                }
+            }
+            duckShake = Math.Max(0, duckShake - dt);
             AdvanceBather(dt, settings.Has(SummerEffect.Bather) || batherInvited);
             AdvancePump(dt, settings.Has(SummerEffect.Pump));
             AdvanceRunner(dt, settings.Has(SummerEffect.Runner));
             AdvanceFrog(dt);
+        }
+
+        private double DuckX()
+        {
+            return scene.Main.X + scene.Main.Half * 0.62 * Math.Sin(clock * 0.21 + 1.3);
         }
 
         private void AdvanceBather(double dt, bool enabled)
@@ -245,13 +270,15 @@ namespace SnowDesk
             SummerScene.Pool main = scene.Main;
             if (duckVisible && main.Volume > 0.3)
             {
-                double half = main.Half;
-                double drift = Math.Sin(clock * 0.21 + 1.3);
-                double x = main.X + half * 0.62 * drift;
+                double x = DuckX();
                 double bob = Math.Sin(clock * 2.1) * 0.8 * S;
                 bool mirror = Math.Cos(clock * 0.21 + 1.3) < 0;
                 canvas.DrawArt(x, scene.Ground - main.Depth(S) * 0.5 + bob, S * Math.Min(1, main.Volume * 1.6), mirror,
-                    g => SummerArt.Duck(g, clock));
+                    g =>
+                    {
+                        if (duckShake > 0) g.RotateTransform((float)(Math.Sin(duckShake * 49) * 12 * duckShake));
+                        SummerArt.Duck(g, clock);
+                    });
             }
         }
 

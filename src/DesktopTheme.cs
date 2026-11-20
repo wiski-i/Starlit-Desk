@@ -24,7 +24,11 @@ namespace SnowDesk
             display => new SeasonScene(display, Season.Spring),
             () => new ScenePreview(viewport => new SeasonScene(viewport, Season.Spring)));
 
-        internal static readonly IReadOnlyList<DesktopTheme> All = Array.AsReadOnly(new[] { Winter, Spring, Summer, Autumn });
+        internal static readonly DesktopTheme Space = new DesktopTheme(
+            "space", "Uzay", "Hilalli gezegen, kayan yıldızlar ve uydular.",
+            display => new SpaceScene(display), () => new ScenePreview(viewport => new SpaceScene(viewport, true), true));
+
+        internal static readonly IReadOnlyList<DesktopTheme> All = Array.AsReadOnly(new[] { Winter, Spring, Summer, Autumn, Space });
 
         internal readonly string Id;
         internal readonly string Name;

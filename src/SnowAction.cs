@@ -2,6 +2,27 @@ using System;
 
 namespace SnowDesk
 {
+    internal sealed class SpaceAction
+    {
+        internal static readonly SpaceAction[] All =
+        {
+            new SpaceAction("Uyduyu gönder", scene => scene.SendSatellite()),
+            new SpaceAction("Meteor geçir", scene => scene.SendMeteor()),
+            new SpaceAction("Aurorayı göster", scene => scene.ShowAurora())
+        };
+
+        internal readonly string Name;
+        internal readonly Action<SpaceScene> Apply;
+
+        private SpaceAction(string name, Action<SpaceScene> apply)
+        {
+            Name = name;
+            Apply = apply;
+        }
+
+        public override string ToString() { return Name; }
+    }
+
     internal sealed class SnowAction
     {
         internal static readonly SnowAction ClearTrees = new SnowAction("Ağaçları temizle", field => field.ClearTrees());

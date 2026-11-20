@@ -25,7 +25,7 @@ namespace SnowDesk
     /// Autumn leaves or spring blossom: pieces tumble down, settle on window tops and the ground, travel with
     /// their window, and are lifted again by shaking a window, by the cursor or by gusts of wind.
     /// </summary>
-    internal sealed class SeasonScene : DesktopScene
+    internal sealed class SeasonScene : DesktopScene, TravelingScene
     {
         private const int MaxFlakes = 700, MaxLedges = 32;
         private readonly Random random = new Random(Guid.NewGuid().GetHashCode());
@@ -43,13 +43,18 @@ namespace SnowDesk
         private bool seeded, hasPointer, ledgesOn = true;
         private Desktop.Point lastPointer;
         private double elapsed, gust, gustDirection = 1, nextGust = 9, gale;
+        private double depositScale = 1, weathering, thaw;
+        private bool damp;
+        private TravelingParticle[] thawPatches;
+        private static readonly Brush ThawSnow = SnowField.Brush(214, 223, 239, 250);
+        public Func<TravelingParticle, bool> Send { private get; set; }
 
         private struct Flake
         {
             internal double X, Y, VX, VY, Angle, Spin, Phase, Sway, Flip, FlipRate;
             internal float Size;
             internal byte Kind, Tint;
-            internal bool Ambient;
+            internal bool Ambient, Wet;
         }
 
         internal SeasonScene(Forms.Screen display, Season season) : this(display.Bounds, display.WorkingArea, season, 1, 0) { }
@@ -67,7 +72,7 @@ namespace SnowDesk
             if (Ground < Height * 0.5) Ground = Height - 1;
             Scale = artScale > 0 ? artScale : Math.Max(1.2, Math.Min(1.9, Height / 900.0));
             Pace = pace;
-            paint = (g, piece, x, y) => SeasonArt.Piece(g, season, piece.Kind, piece.Tint, piece.Size, piece.Angle, 1, x, y, true);
+            paint = (g, piece, x, y) => SeasonArt.Piece(g, season, piece.Kind, piece.Tint, piece.Size, piece.Angle, 1, x, y, true, piece.Wet);
             ground = new PieceLedge(IntPtr.Zero, paint, (float)((season == Season.Autumn ? 20 : 8) * Scale), 5);
             ground.Place(new Rect(0, Ground, Width, 1), 0, Ground, Width);
             for (int cell = 0; cell < ground.Visible.Length; cell++) ground.Visible[cell] = true;
@@ -89,6 +94,48 @@ namespace SnowDesk
         internal Random Random { get { return random; } }
         internal PieceLedge GroundPile { get { return ground; } }
         internal ISeasonCast Cast { get { return cast; } }
+        internal double Thawing { get { return thaw; } }
+
+        internal void BeginThaw(TravelingParticle[] patches)
+        {
+            if (patches.Length == 0) return;
+            thawPatches = patches;
+            thaw = 1;
+        }
+
+        internal bool TryPerch(double x, out double y)
+        {
+            if (ledgesOn)
+                foreach (PieceLedge ledge in visibleLedges)
+                    if (ledge.VisibleAt(x) && ledge.Y > Height * 0.15 && ledge.Y < Ground - 40)
+                    {
+                        y = ledge.SurfaceAt(x) - 3 * Scale;
+                        return true;
+                    }
+            y = 0;
+            return false;
+        }
+
+        internal bool NudgeFallingLeaf(double x, double y, double vx)
+        {
+            for (int i = flakes.Count - 1; i >= 0; i--)
+            {
+                Flake leaf = flakes[i];
+                if (Math.Abs(leaf.X - x) > 26 * Scale || Math.Abs(leaf.Y - y) > 19 * Scale) continue;
+                leaf.VX += vx;
+                leaf.VY = -55 * Scale;
+                flakes[i] = leaf;
+                return true;
+            }
+            return false;
+        }
+
+        public void Receive(TravelingParticle p)
+        {
+            if (flakes.Count >= MaxFlakes) return;
+            flakes.Add(new Flake { X = p.X, Y = p.Y, VX = p.VX, VY = p.VY, Size = (float)p.Size, Angle = p.Angle,
+                Kind = p.Kind, Tint = p.Tint, Spin = p.Spin, Sway = 1.4, FlipRate = 2.5, Wet = p.Mass > 0 });
+        }
 
         public bool UsesWindowGeometry(Settings settings) { return settings.WindowLedges; }
 
@@ -128,6 +175,7 @@ namespace SnowDesk
                 if (bounds.Top <= screen.Top + 2 || bounds.Top - screen.Top >= Ground - 12 || right - left < 32) continue;
                 PieceLedge ledge = Locate(windows[i].Handle, bounds, left - screen.Left, bounds.Top - screen.Top,
                     right - left, scanTime);
+                ledge.SetRim(windows[i].CornerRadius, bounds.Left - left, bounds.Right - left);
                 bool any = false;
                 for (int cell = 0; cell < ledge.Visible.Length; cell++)
                 {
@@ -164,16 +212,13 @@ namespace SnowDesk
                 ledges.Add(handle, ledge);
                 return ledge;
             }
-            if (ledge.X == x && ledge.Y == y && ledge.Width == width) return ledge;
-            double shift = bounds.Width == ledge.Window.Width ? bounds.Left - ledge.Window.Left : 0;
-            double vertical = y - ledge.Y;
-            double travel = Math.Sqrt(shift * shift + vertical * vertical);
-            double loosened = 1 - Math.Exp(-travel / 36);
-            double vx = Clamp(shift / scanTime * 0.5, -420, 420);
-            double vy = Clamp(vertical / scanTime * 0.35, -160, 140) - 50;
+            double loosened = ledge.Motion.Sample(ledge.Window, bounds, scanTime);
+            double vx = Clamp(ledge.Motion.ThrowX * 0.5, -420, 420);
+            double vy = Clamp(ledge.Motion.ThrowY * 0.35, -160, 140) - (20 + 60 * loosened);
             if (loosened > 0.02 && ledge.Count > 0)
-                ledge.Lift(double.MinValue, double.MaxValue, loosened, random, (px, py, piece) => Launch(px, py, piece, vx, vy));
-            ledge.Place(bounds, x, y, width);
+                ledge.Lift(double.MinValue, double.MaxValue, loosened, random, (px, py, piece) => Launch(px, py, piece, vx, vy),
+                    Math.Min(1, 2 * loosened));
+            if (ledge.Window != bounds || ledge.X != x || ledge.Y != y || ledge.Width != width) ledge.Place(bounds, x, y, width);
             return ledge;
         }
 
@@ -183,7 +228,7 @@ namespace SnowDesk
             if (flakes.Count >= MaxFlakes) return;
             flakes.Add(new Flake
             {
-                X = x, Y = y - 1, Size = piece.Size, Kind = piece.Kind, Tint = piece.Tint, Angle = piece.Angle,
+                X = x, Y = y - 1, Size = piece.Size, Kind = piece.Kind, Tint = piece.Tint, Angle = piece.Angle, Wet = piece.Wet,
                 VX = vx + (random.NextDouble() * 2 - 1) * 45, VY = vy - random.NextDouble() * 60,
                 Spin = (random.NextDouble() * 2 - 1) * 260, Phase = random.NextDouble() * 6.28,
                 Sway = 1.6 + random.NextDouble() * 1.4, FlipRate = 3 + random.NextDouble() * 5
@@ -203,6 +248,23 @@ namespace SnowDesk
             if (seconds <= 0) return;
             elapsed += seconds;
             ledgesOn = settings.WindowLedges;
+            depositScale = settings.DepositScale;
+            thaw = Math.Max(0, thaw - seconds * 0.16);
+            bool wetSeason = Season == Season.Autumn && (elapsed + 24) % 97 < 33;
+            if (damp && !wetSeason)
+            {
+                ground.Dry();
+                foreach (PieceLedge ledge in visibleLedges) ledge.Dry();
+            }
+            damp = wetSeason;
+            weathering += seconds;
+            if (weathering >= 1.2)
+            {
+                double fade = (depositScale <= 0 ? 0.11 : 0.0065) * settings.MeltScale * weathering;
+                ground.Lift(double.MinValue, double.MaxValue, fade, random, null);
+                foreach (PieceLedge ledge in visibleLedges) ledge.Lift(double.MinValue, double.MaxValue, fade, random, null);
+                weathering = 0;
+            }
             AdvanceWind(seconds, settings);
             if (settings.CursorSweep && hasPointer) Sweep(lastPointer, pointer, seconds);
             lastPointer = pointer;
@@ -229,10 +291,10 @@ namespace SnowDesk
                 // A gust lifts a few pieces off the ground and the window tops.
                 double chance = strength * seconds * 0.5;
                 ground.Lift(double.MinValue, double.MaxValue, chance * 0.4, random,
-                    (x, y, piece) => Launch(x, y, piece, gustDirection * 120, -90));
+                    (x, y, piece) => Launch(x, y, piece, gustDirection * 120, -90), strength);
                 foreach (PieceLedge ledge in visibleLedges)
                     ledge.Lift(double.MinValue, double.MaxValue, chance, random,
-                        (x, y, piece) => Launch(x, y, piece, gustDirection * 140, -60));
+                        (x, y, piece) => Launch(x, y, piece, gustDirection * 140, -60), strength);
             }
             GaleStrength = 0;
             if (gale > 0)
@@ -252,19 +314,19 @@ namespace SnowDesk
         /// <summary>A quick cursor flick through a pile throws the pieces it passes along its path.</summary>
         private void Sweep(Desktop.Point start, Desktop.Point end, double seconds)
         {
-            double dx = (double)end.X - start.X, dy = (double)end.Y - start.Y;
-            double distance = Math.Sqrt(dx * dx + dy * dy);
-            double speed = distance / Math.Max(0.008, seconds);
-            if (speed < 260) return;
+            var motion = CursorImpulse.Measure(start, end, seconds);
+            if (motion.Strength <= 0) return;
             double x0 = Math.Min(start.X, end.X) - screen.Left, x1 = Math.Max(start.X, end.X) - screen.Left;
             double y0 = Math.Min(start.Y, end.Y) - screen.Top, y1 = Math.Max(start.Y, end.Y) - screen.Top;
             double reach = 18 * Scale;
-            double vx = Clamp(dx / seconds * 0.45, -460, 460), vy = Clamp(dy / seconds * 0.25, -200, 120) - 120;
+            double vx = Clamp(motion.DX / seconds * 0.45, -460, 460);
+            double vy = Clamp(motion.DY / seconds * 0.25, -200, 120) - (12 + motion.Strength * 118);
             Action<double, double, PieceLedge.Piece> kick = (x, y, piece) => Launch(x, y, piece, vx, vy);
-            if (y1 >= Ground - 30 * Scale && y0 <= Ground + 4) ground.Lift(x0 - reach, x1 + reach, 0.85, random, kick);
+            double chance = motion.Strength * (Season == Season.Autumn ? 0.75 : 0.95);
+            if (y1 >= Ground - 30 * Scale && y0 <= Ground + 4) ground.Lift(x0 - reach, x1 + reach, chance, random, kick, motion.Strength);
             if (!ledgesOn) return;
             foreach (PieceLedge ledge in visibleLedges)
-                if (y1 >= ledge.Y - 24 * Scale && y0 <= ledge.Y + 6) ledge.Lift(x0 - reach, x1 + reach, 0.85, random, kick);
+                if (y1 >= ledge.Y - 24 * Scale && y0 <= ledge.Y + 6) ledge.Lift(x0 - reach, x1 + reach, chance, random, kick, motion.Strength);
         }
 
         private void AdvanceFlakes(double seconds, Settings settings)
@@ -273,23 +335,31 @@ namespace SnowDesk
             int density = autumn ? (settings.Density == 0 ? 16 : settings.Density == 1 ? 30 : 54)
                 : (settings.Density == 0 ? 34 : settings.Density == 1 ? 66 : 120);
             int target = (int)Math.Min(MaxFlakes / 2, density * Math.Sqrt(Width * Height / 2073600.0));
-            while (ambient < target) SpawnAmbient(autumn);
+            while (ambient < target && flakes.Count < MaxFlakes) SpawnAmbient(autumn);
             double sizeScale = Height < 400 ? 0.6 : 1;
             for (int i = flakes.Count - 1; i >= 0; i--)
             {
                 Flake flake = flakes[i];
                 double oldY = flake.Y;
-                double fall = (autumn ? 46 : 34) * (0.7 + flake.Size / (autumn ? 20 : 9)) * sizeScale;
+                double leafFall = flake.Kind == 0 ? 39 : flake.Kind == 1 ? 56 : 46;
+                double fall = (autumn ? leafFall : 34) * (0.7 + flake.Size / (autumn ? 20 : 9)) * sizeScale;
+                if (flake.Wet) fall *= 1.32;
                 flake.Phase += seconds * flake.Sway;
-                double targetVX = Wind * (autumn ? 0.85 : 1) + Math.Sin(flake.Phase) * (autumn ? 34 : 24);
+                double drift = autumn && flake.Kind == 2 ? 1.20 : 0.85;
+                double sway = autumn ? (flake.Kind == 0 ? 49 : flake.Kind == 1 ? 23 : 32) : 24;
+                double targetVX = Wind * drift + Math.Sin(flake.Phase) * sway;
                 flake.VX += (targetVX - flake.VX) * Math.Min(1, seconds * 1.6);
                 flake.VY += (fall * (1 + 0.45 * Math.Cos(flake.Phase * 2)) - flake.VY) * Math.Min(1, seconds * 2);
                 flake.X += flake.VX * seconds;
                 flake.Y += flake.VY * seconds;
-                flake.Angle += (flake.Spin + flake.VX * 0.6) * seconds;
+                flake.Angle += (flake.Spin * (autumn && flake.Kind == 2 ? 1.75 : 1) + flake.VX * 0.6) * seconds;
                 flake.Flip += flake.FlipRate * seconds;
+                bool crossed = Send != null && (flake.X < 0 || flake.X >= Width) &&
+                    Send(new TravelingParticle { X = flake.X, Y = flake.Y, VX = flake.VX, VY = flake.VY,
+                        Kind = flake.Kind, Tint = flake.Tint, Angle = flake.Angle, Size = flake.Size,
+                        Mass = flake.Wet ? 1 : 0, Spin = flake.Spin });
                 bool outside = flake.X < -30 || flake.X > Width + 30;
-                if (outside && !flake.Ambient)
+                if (!crossed && outside && !flake.Ambient)
                 {
                     // Pieces blown off the screen are gone; only the steady fall wraps around.
                     flakes[i] = flakes[flakes.Count - 1];
@@ -298,7 +368,7 @@ namespace SnowDesk
                 }
                 if (flake.X < -30) flake.X += Width + 60;
                 else if (flake.X > Width + 30) flake.X -= Width + 60;
-                if (flake.VY > 0 && Settle(oldY, ref flake))
+                if (crossed || (flake.VY > 0 && Settle(oldY, ref flake)) || (flake.Ambient && ambient > target && flake.Y > Ground))
                 {
                     if (flake.Ambient) ambient--;
                     flakes[i] = flakes[flakes.Count - 1];
@@ -336,16 +406,22 @@ namespace SnowDesk
                     if (!ledge.VisibleAt(flake.X)) continue;
                     double surface = ledge.SurfaceAt(flake.X);
                     if (oldY > surface || flake.Y < surface) continue;
-                    if (ledge.Rest(flake.X, flake.Kind, flake.Tint, flake.Size, rest)) return true;
+                    if (depositScale <= 0 || random.NextDouble() > depositScale) return true;
+                    if (ledge.Rest(flake.X, flake.Kind, flake.Tint, flake.Size, rest, damp || flake.Wet, depositScale)) return true;
                 }
             if (flake.Y < ground.SurfaceAt(flake.X)) return false;
-            ground.Rest(Clamp(flake.X, 1, Width - 1), flake.Kind, flake.Tint, flake.Size, rest);
+            if (depositScale > 0 && random.NextDouble() <= depositScale)
+                ground.Rest(Clamp(flake.X, 1, Width - 1), flake.Kind, flake.Tint, flake.Size, rest, damp || flake.Wet, depositScale);
             return true;
         }
 
         public void Draw(Canvas drawing)
         {
             cast.DrawBack(drawing);
+            if (thaw > 0 && thawPatches != null)
+                foreach (TravelingParticle patch in thawPatches)
+                    drawing.DrawEllipse(ThawSnow, null, new System.Windows.Point(patch.X, Ground - patch.Mass * thaw * 0.24),
+                        patch.Size * (0.34 + thaw * 0.27), Math.Max(0.75, patch.Mass * thaw * 0.39));
             drawing.DrawArt(0, 0, 1, false, g =>
             {
                 if (ledgesOn) foreach (PieceLedge ledge in visibleLedges) ledge.Draw(g);
@@ -356,7 +432,8 @@ namespace SnowDesk
             {
                 foreach (Flake flake in flakes)
                     SeasonArt.Piece(g, Season, flake.Kind, flake.Tint, flake.Size, (float)flake.Angle,
-                        (float)Math.Cos(flake.Flip), (float)flake.X, (float)flake.Y, false);
+                        (float)Math.Cos(flake.Flip), (float)flake.X, (float)flake.Y, false, flake.Wet,
+                        flake.Size < Scale * (Season == Season.Autumn ? 18 : 6.6));
             });
         }
 
