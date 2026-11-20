@@ -35,6 +35,7 @@ namespace SnowDesk
         private Bitmap cache;
         private Graphics cacheGraphics;
         private bool dirty = true;
+        private int staleFrames;
         private SurfaceRim rim;
 
         internal readonly IntPtr Handle;
@@ -185,7 +186,10 @@ namespace SnowDesk
         internal void Draw(Graphics g)
         {
             if (pieces.Count == 0 || Visible.Length == 0) return;
-            if (dirty || cache == null) Repaint();
+            // Gusts, sweeps and weathering lift pieces every frame; repainting the whole pile each time made
+            // those frames spike, so a pile is repainted at most every fourth frame. New pieces still appear
+            // at once because Rest paints them onto the cache directly.
+            if (cache == null || (dirty && ++staleFrames >= 4)) Repaint();
             GraphicsState state = g.Save();
             try
             {
@@ -224,6 +228,7 @@ namespace SnowDesk
             cacheGraphics.Clear(Color.Transparent);
             foreach (Piece piece in pieces) PaintResting(piece);
             dirty = false;
+            staleFrames = 0;
         }
 
         private void PaintResting(Piece piece)

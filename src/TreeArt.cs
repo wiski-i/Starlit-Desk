@@ -57,6 +57,19 @@ namespace SnowDesk
         internal static void Tree(Graphics g, Season season, double foliage, double sway)
         {
             Trunk(g, (float)sway);
+            Crown(g, season, foliage, sway);
+        }
+
+        /// <summary>Extent of the trunk and of the crown in art units, for caching each as a bitmap.</summary>
+        internal static readonly RectangleF TrunkBounds = new RectangleF(-50, -142, 80, 146);
+        internal static readonly RectangleF CrownBounds = new RectangleF(-82, -158, 164, 100);
+
+        /// <summary>The bare trunk and branches without sway.</summary>
+        internal static void Trunk(Graphics g) { Trunk(g, 0); }
+
+        /// <summary>The canopy alone; <paramref name="foliage"/> 0..1 thins it clump by clump.</summary>
+        internal static void Crown(Graphics g, Season season, double foliage, double sway)
+        {
             int shown = (int)Math.Round(Clumps * Math.Max(0, Math.Min(1, foliage)));
             if (shown == 0) return;
             Brush[] fills = season == Season.Autumn ? AutumnClump : SpringClump;

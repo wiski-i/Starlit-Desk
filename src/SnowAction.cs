@@ -8,7 +8,12 @@ namespace SnowDesk
         {
             new SpaceAction("Uyduyu gönder", scene => scene.SendSatellite()),
             new SpaceAction("Meteor geçir", scene => scene.SendMeteor()),
-            new SpaceAction("Aurorayı göster", scene => scene.ShowAurora())
+            new SpaceAction("Aurorayı göster", scene => scene.ShowAurora()),
+            new SpaceAction("Süpernova patlat", scene => scene.Trigger(SpaceEvents.Supernova)),
+            new SpaceAction("Gezegen geçir", scene => scene.Trigger(SpaceEvents.Giant)),
+            new SpaceAction("Asteroit çarpıştır", scene => scene.Trigger(SpaceEvents.Collision)),
+            new SpaceAction("Kuyruklu yıldız", scene => scene.Trigger(SpaceEvents.Comet)),
+            new SpaceAction("Astronot gönder", scene => scene.Trigger(SpaceEvents.Astronaut))
         };
 
         internal readonly string Name;

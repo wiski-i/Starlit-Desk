@@ -35,6 +35,7 @@ namespace SnowDesk
         private int starCount, dustCount, look = -1;
         private double lookFade = 1;
         private SpaceArt.SkySprite planetSprite, cloudSprite;
+        private readonly SpaceEvents events;
         private int cachedLook = -1;
 
         private struct Star
@@ -64,6 +65,8 @@ namespace SnowDesk
             nextAurora = preview ? 24 : 97 + random.NextDouble() * 57;
             painter = DrawSky;
             Seed();
+            events = new SpaceEvents(screen.Width, screen.Height, scale, preview,
+                unchecked(screen.X * 31 + screen.Width * 7 + screen.Height));
         }
 
         private void Seed()
@@ -119,6 +122,8 @@ namespace SnowDesk
         internal void SendSatellite() { StartSatellite(true); }
         internal void SendMeteor() { StartMeteor(true); }
         internal void ShowAurora() { StartAurora(true); }
+        /// <summary>Starts a supernova, giant transit, collision, comet or astronaut (<see cref="SpaceEvents"/>).</summary>
+        internal void Trigger(int which) { events.Trigger(which); }
 
         public void Advance(double seconds, Settings settings, Desktop.Point pointer)
         {
@@ -154,6 +159,7 @@ namespace SnowDesk
             }
             lastPointer = pointer;
             hasPointer = true;
+            events.Advance(step, effects, motion);
             if (satelliteAge > 0) satelliteAge = Math.Max(0, satelliteAge - seconds);
             if (meteorAge > 0) meteorAge = Math.Max(0, meteorAge - seconds);
             if (auroraAge > 0) auroraAge = Math.Max(0, auroraAge - seconds);
@@ -247,6 +253,7 @@ namespace SnowDesk
             bool hasPlanet = (effects & SpaceEffect.Planet) != 0 && lookFade > 0.015;
             PrepareSky(deep, hasPlanet, x, y, radius);
             if (deep && lookFade > 0.015) cloudSprite.Draw(g, (float)lookFade);
+            events.DrawBackground(g, effects, deep);
             DrawStars(g, width, height, x + drift, y, hasPlanet ? radius : 0);
             if (hasPlanet)
             {
@@ -257,6 +264,7 @@ namespace SnowDesk
                     if (light > 0.035) SpaceArt.Aurora(g, x + drift, y, radius, deep, Math.Sin(elapsed * 0.88), light);
                 }
             }
+            events.Draw(g);
             DrawDust(g);
             if (satelliteAge > 0 && (manualSatellite || (effects & SpaceEffect.Satellite) != 0))
                 DrawSatellite(g, width, height);
@@ -334,6 +342,7 @@ namespace SnowDesk
         {
             ReleaseSky();
             masking.Dispose();
+            events.Dispose();
         }
     }
 }

@@ -57,6 +57,7 @@ namespace SnowDesk
     }
 
     [Flags]
+    /// <summary>Optional pieces of the space theme; stored as the "space2" bit mask.</summary>
     internal enum SpaceEffect
     {
         Planet = 1,
@@ -64,7 +65,13 @@ namespace SnowDesk
         Meteors = 4,
         Aurora = 8,
         Dust = 16,
-        All = 31
+        Supernova = 32,
+        Giant = 64,
+        Collision = 128,
+        Comet = 256,
+        Astronaut = 512,
+        MilkyWay = 1024,
+        All = 2047
     }
 
     internal sealed class Settings
@@ -209,7 +216,7 @@ namespace SnowDesk
                     if (key == "summer") settings.Summer = (SummerEffect)(value & (int)SummerEffect.All);
                     if (key == "autumn2") settings.Autumn = (AutumnEffect)(value & (int)AutumnEffect.All);
                     if (key == "spring2") settings.Spring = (SpringEffect)(value & (int)SpringEffect.All);
-                    if (key == "space") settings.Space = (SpaceEffect)(value & (int)SpaceEffect.All);
+                    if (key == "space2") settings.Space = (SpaceEffect)(value & (int)SpaceEffect.All);
                     if (key == "spacelook" && value >= 0 && value <= 1) settings.SpaceLook = value;
                     if (key == "spaceocclusion") settings.SpaceOcclusion = value != 0;
                 }
@@ -237,7 +244,7 @@ namespace SnowDesk
                 writer.WriteLine("batterysaver=" + (BatterySaver ? 1 : 0));
                 writer.WriteLine("pauseapps=" + PausedApps);
                 writer.WriteLine("quietapps=" + QuietApps);
-                writer.WriteLine("space=" + (int)Space);
+                writer.WriteLine("space2=" + (int)Space);
                 writer.WriteLine("spacelook=" + SpaceLook);
                 writer.WriteLine("spaceocclusion=" + (SpaceOcclusion ? 1 : 0));
                 foreach (var entry in ScreenThemes) writer.WriteLine("screentheme:" + entry.Key + "=" + entry.Value.Id);

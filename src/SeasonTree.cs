@@ -87,10 +87,27 @@ namespace SnowDesk
         internal double HiveX { get { return X + TreeArt.HiveBranch.X * T; } }
         internal double HiveY { get { return scene.Ground + TreeArt.HiveBranch.Y * T; } }
 
+        private readonly ArtCache cache = new ArtCache(40);
+
+        /// <summary>Clump count steps of the crown; the cached crown is redrawn only when this changes.</summary>
+        internal static int CrownStep(double foliage) { return (int)Math.Round(Math.Max(0, Math.Min(1, foliage)) * 13); }
+
         internal void Draw(Canvas canvas)
         {
             if (!Present) return;
             double sway = Math.Max(-6, Math.Min(6, scene.Wind / 25.0)) + Math.Sin(scene.Clock * 0.8) * 0.6;
+            if (onGround && toppleDirection == 0 && squash <= 0)
+            {
+                // Standing still: trunk and crown come from cached bitmaps; the crown sways by a small shift.
+                Season standing = scene.Season;
+                int step = CrownStep(Foliage);
+                float scale = (float)T;
+                cache.Draw(canvas, 0, X, scene.Ground, TreeArt.TrunkBounds, scale, false, TreeArt.Trunk);
+                if (step > 0)
+                    cache.Draw(canvas, 1 + step, X + sway * 0.9 * T, scene.Ground, TreeArt.CrownBounds, scale, false,
+                        g => TreeArt.Crown(g, standing, step / 13.0, 0));
+                return;
+            }
             float stretch = (float)(1 - 0.1 * Math.Sin(squash * Math.PI * 2) * squash);
             float angle = (float)topple;
             double foliage = Foliage;

@@ -20,6 +20,7 @@ namespace SnowDesk
         private readonly Label intro, status, themeDetail;
         private readonly Button pause;
         private readonly Control screenCard;
+        private Control generalCard;
         private readonly FlowLayoutPanel screenList;
         private string screenLayout;
         private DesktopTheme actionTheme;
@@ -165,14 +166,8 @@ namespace SnowDesk
                 }));
             themeCards.Add(DesktopTheme.Space, BuildSpaceCard());
             // Cards grow with their list of pieces; the row keeps both columns the same height.
-            int tallest = general.Height;
-            foreach (Control card in themeCards.Values)
-            {
-                themeColumn.Controls.Add(card);
-                tallest = Math.Max(tallest, card.Height);
-            }
-            general.Height = tallest;
-            foreach (Control card in themeCards.Values) card.Height = tallest;
+            foreach (Control card in themeCards.Values) themeColumn.Controls.Add(card);
+            generalCard = general;
             var winterBody = (TableLayoutPanel)winter.Controls[0];
             var winterGrid = DeskStyle.Flow(2);
             winterGrid.ColumnStyles[0] = new ColumnStyle(SizeType.Percent, 46);
@@ -255,6 +250,13 @@ namespace SnowDesk
                 foreach (DeskSelect select in densitySelects) select.SelectedIndex = settings.Density;
                 rate.SelectedIndex = Array.IndexOf(Rates, settings.Rate);
                 foreach (var pair in themeCards) pair.Value.Visible = pair.Key == selected;
+                // The general card matches the visible theme card so the row stays even.
+                Control shown;
+                if (themeCards.TryGetValue(selected, out shown))
+                {
+                    shown.Height = Math.Max(shown.Height, 291);
+                    generalCard.Height = shown.Height;
+                }
                 if (actionTheme != selected)
                 {
                     actionTheme = selected;
@@ -525,6 +527,13 @@ namespace SnowDesk
             AddSpace(details, "Seyrek meteorlar", SpaceEffect.Meteors);
             AddSpace(details, "Gezegen aurorası", SpaceEffect.Aurora);
             AddSpace(details, "Kozmik toz", SpaceEffect.Dust);
+            AddSpace(details, "Samanyolu yıldız tozu", SpaceEffect.MilkyWay);
+            AddSpace(details, "Süpernova", SpaceEffect.Supernova);
+            AddSpace(details, "Halkalı gezegen geçişi", SpaceEffect.Giant);
+            AddSpace(details, "Asteroit çarpışması", SpaceEffect.Collision);
+            AddSpace(details, "Kuyruklu yıldız", SpaceEffect.Comet);
+            AddSpace(details, "Astronot", SpaceEffect.Astronaut);
+            card.Height = Math.Max(card.Height, 112 + 32 * (details.Controls.Count - 1));
             return card;
         }
 

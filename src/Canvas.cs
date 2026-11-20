@@ -50,6 +50,16 @@ namespace SnowDesk
             }
         }
 
+        /// <summary>Copies a prepared bitmap with its top-left at the nearest pixel to (x, y), without resampling.</summary>
+        internal void Blit(Bitmap image, double x, double y)
+        {
+            graphics.PixelOffsetMode = PixelOffsetMode.None;
+            graphics.InterpolationMode = InterpolationMode.NearestNeighbor;
+            graphics.DrawImage(image, (int)Math.Round(x), (int)Math.Round(y), image.Width, image.Height);
+            graphics.PixelOffsetMode = PixelOffsetMode.Half;
+            graphics.InterpolationMode = InterpolationMode.Bilinear;
+        }
+
         internal void Flush() { graphics.Flush(FlushIntention.Sync); }
         public void Dispose() { graphics.Dispose(); }
 

@@ -58,6 +58,60 @@ namespace SnowDesk
         internal static void Piece(Graphics g, Season season, byte kind, byte tint, float size, float angle, float flip,
             float x, float y, bool resting, bool wet = false, bool far = false)
         {
+            // Pieces are drawn hundreds of times a frame, so each look is rendered once into a small cached
+            // bitmap: size in 10% steps, rotation in 10 degree steps, tumble width in four steps.
+            int sizeStep = Math.Max(0, Math.Min(63, (int)Math.Round(Math.Log(Math.Max(1, size)) / SizeRatio)));
+            int angleStep = (((int)Math.Round(angle / (360f / AngleSteps))) % AngleSteps + AngleSteps) % AngleSteps;
+            float width = Math.Max(0.3f, Math.Abs(flip));
+            int flipStep = Math.Min(FlipSteps - 1, (int)Math.Round((width - 0.3f) / 0.7f * (FlipSteps - 1)));
+            long key = ((((((long)sizeStep * AngleSteps + angleStep) * FlipSteps + flipStep) * 8 + kind % 8) * 8 + tint % 8) << 5) |
+                ((season == Season.Autumn ? 1L : 0) << 4) | ((flip < 0 ? 1L : 0) << 3) | ((resting ? 1L : 0) << 2) |
+                ((wet ? 1L : 0) << 1) | (far ? 1L : 0);
+            Bitmap sprite;
+            if (!Sprites.TryGetValue(key, out sprite))
+            {
+                if (Sprites.Count >= MaxSprites)
+                {
+                    foreach (Bitmap old in Sprites.Values) old.Dispose();
+                    Sprites.Clear();
+                }
+                float quantized = (float)Math.Exp(sizeStep * SizeRatio);
+                float face = (0.3f + flipStep * 0.7f / (FlipSteps - 1)) * (flip < 0 ? -1 : 1);
+                sprite = RenderPiece(season, kind, tint, quantized, angleStep * 360f / AngleSteps, face, resting, wet, far);
+                Sprites.Add(key, sprite);
+            }
+            // A half-pixel offset or filtering would resample every copy; a plain blit is what makes this cheap.
+            PixelOffsetMode offset = g.PixelOffsetMode;
+            InterpolationMode filter = g.InterpolationMode;
+            g.PixelOffsetMode = PixelOffsetMode.None;
+            g.InterpolationMode = InterpolationMode.NearestNeighbor;
+            g.DrawImage(sprite, (int)Math.Round(x - sprite.Width * 0.5f), (int)Math.Round(y - sprite.Height * 0.5f), sprite.Width, sprite.Height);
+            g.PixelOffsetMode = offset;
+            g.InterpolationMode = filter;
+        }
+
+        private const int AngleSteps = 36, FlipSteps = 4, MaxSprites = 6000;
+        private static readonly double SizeRatio = Math.Log(1.1);
+        private static readonly System.Collections.Generic.Dictionary<long, Bitmap> Sprites =
+            new System.Collections.Generic.Dictionary<long, Bitmap>();
+
+        private static Bitmap RenderPiece(Season season, byte kind, byte tint, float size, float angle, float flip,
+            bool resting, bool wet, bool far)
+        {
+            int side = (int)Math.Ceiling(size * 1.15f) + 4;
+            var sprite = new Bitmap(side, side, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+            using (Graphics g = Graphics.FromImage(sprite))
+            {
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.PixelOffsetMode = PixelOffsetMode.Half;
+                DrawPiece(g, season, kind, tint, size, angle, flip, side * 0.5f, side * 0.5f, resting, wet, far);
+            }
+            return sprite;
+        }
+
+        private static void DrawPiece(Graphics g, Season season, byte kind, byte tint, float size, float angle, float flip,
+            float x, float y, bool resting, bool wet, bool far)
+        {
             bool autumn = season == Season.Autumn;
             GraphicsPath[] shapes = autumn ? AutumnShapes : SpringShapes;
             Brush[] front = autumn ? AutumnFront : SpringFront, back = autumn ? AutumnBack : SpringBack;

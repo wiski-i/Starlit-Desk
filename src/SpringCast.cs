@@ -26,6 +26,9 @@ namespace SnowDesk
             internal bool Ledge;
         }
 
+        private static readonly System.Drawing.RectangleF GrassBounds = new System.Drawing.RectangleF(-16, -22, 34, 24);
+        private static readonly System.Drawing.RectangleF FlowerBounds = new System.Drawing.RectangleF(-18, -56, 44, 58);
+        private readonly ArtCache garnish = new ArtCache(900);
         private readonly SeasonScene scene;
         private readonly SpringOrchard orchard;
         private readonly List<Bloom> garden = new List<Bloom>();
@@ -295,8 +298,19 @@ namespace SnowDesk
             {
                 Bloom b = bloom;
                 double bend = sway + Math.Sin(clock * 1.3 + b.Seed) * 0.4;
-                canvas.DrawArt(b.X + 9 * S, scene.Ground, S, false, g => SeasonArt.Grass(g, b.Seed, bend * 3));
-                canvas.DrawArt(b.X, scene.Ground, S, false, g => SeasonArt.Flower(g, b.Kind, b.Tint, b.Grow, bend, Openness(b)));
+                // Growth, sway and opening are stepped so each look is drawn once and then blitted from the cache.
+                int bendStep = (int)Math.Round(bend * 4), growStep = (int)Math.Round(b.Grow * 20);
+                int openStep = (int)Math.Round(Openness(b) * 8);
+                float scale = (float)S;
+                double grassBend = bendStep / 4.0 * 3;
+                long grassKey = ((long)(b.Seed & 0xFFFF) << 8) | (uint)(bendStep + 64);
+                garnish.Draw(canvas, grassKey, b.X + 9 * S, scene.Ground, GrassBounds, scale, false,
+                    g => SeasonArt.Grass(g, b.Seed, grassBend));
+                long flowerKey = (1L << 40) | ((long)b.Kind << 32) | ((long)b.Tint << 28) | ((long)growStep << 20) |
+                    ((long)(bendStep + 64) << 8) | (uint)openStep;
+                int kind = b.Kind, tint = b.Tint;
+                garnish.Draw(canvas, flowerKey, b.X, scene.Ground, FlowerBounds, scale, false,
+                    g => SeasonArt.Flower(g, kind, tint, growStep / 20.0, bendStep / 4.0, openStep / 8.0));
             }
         }
 
