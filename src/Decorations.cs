@@ -16,6 +16,7 @@ namespace SnowDesk
         private readonly Action<SnowLedge, double, double> spillPlow;
         private readonly Action<double, double, double, double> sprayPlow;
         private readonly Action<SnowLedge, double, double> kickPowder;
+        private readonly Action<double, double, double> shedBranch;
         private readonly Random random = new Random(Guid.NewGuid().GetHashCode());
         private readonly List<Actor> actors = new List<Actor>(5);
         private double nextTree = 11, nextSleigh = 24, nextSanta = 19, nextPlow = 13, nextGondola = 15;
@@ -29,17 +30,20 @@ namespace SnowDesk
             internal double GatheredSnow, PlowEnd, SidePowder, Overflow, SprayWait, UnloadLeft, UnloadRate, PourWait;
             internal double PlowResistance;
             internal double RootSupport, Snowline;
+            internal double BranchSlip;
             internal SnowLedge Ledge;
             internal bool Manual, Unloading, LeavingScreen;
         }
 
         internal Decorations(int width, int height, Action<SnowLedge, double, double> spillPlow,
-            Action<SnowLedge, double, double> kickPowder, Action<double, double, double, double> sprayPlow)
+            Action<SnowLedge, double, double> kickPowder, Action<double, double, double, double> sprayPlow,
+            Action<double, double, double> shedBranch = null)
         {
             this.width = width;
             this.height = height;
             this.spillPlow = spillPlow;
             this.kickPowder = kickPowder;
+            this.shedBranch = shedBranch;
             this.sprayPlow = sprayPlow;
             scale = Math.Max(1, Math.Min(1.65, height / 1080.0));
             flourish = Desktop.DecorativeMotionEnabled();
@@ -112,6 +116,16 @@ namespace SnowDesk
 
         internal void Advance(double dt, double clock, Settings settings, List<SnowLedge> ledges)
         {
+            if (settings.QuietScene)
+            {
+                for (int i = actors.Count - 1; i >= 0; i--)
+                {
+                    if (actors[i] == held) continue;
+                    Spill(actors[i]);
+                    actors.RemoveAt(i);
+                }
+                return;
+            }
             TickSpawn(Effect.Trees, ref nextTree, 18, clock, settings, ledges);
             TickSpawn(Effect.Santa, ref nextSanta, 32, clock, settings, ledges);
             TickSpawn(Effect.Plow, ref nextPlow, 9, clock, settings, ledges);
@@ -364,6 +378,12 @@ namespace SnowDesk
                     actor.LastLeft = ledge.X;
                     actor.LastWidth = ledge.Width;
                     actor.SettledTime += dt;
+                    if (actor.BranchSlip > 0)
+                    {
+                        actor.BranchSlip -= dt;
+                        if (actor.BranchSlip <= 0 && shedBranch != null && ledge.SurfaceAt(actor.X) < ledge.SupportAt(actor.X) - 1.5)
+                            shedBranch(actor.X + 13 * scale, actor.Y - 23 * scale, 2.4 * scale);
+                    }
                     return true;
                 }
                 actor.Ledge = null;
@@ -390,6 +410,7 @@ namespace SnowDesk
                     actor.LastLeft = support.X;
                     actor.LastWidth = support.Width;
                     actor.SettledTime = 0;
+                    actor.BranchSlip = random.NextDouble() < 0.43 ? 12 + random.NextDouble() * 9 : 0;
                     break;
                 }
             }
@@ -415,6 +436,7 @@ namespace SnowDesk
                         break;
                     case Effect.Plow:
                         phase = (actor.X - actor.Ledge.X) / (6.5 * scale);
+                        angle = actor.Unloading ? 0 : 3.1 * actor.PlowResistance;
                         if (actor.GatheredSnow > 0.001)
                         {
                             double heap = Math.Sqrt(actor.GatheredSnow);

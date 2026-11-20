@@ -30,6 +30,9 @@ namespace SnowDesk
             internal bool Trunk;
         }
         private double total, radius, windowLeft, windowRight;
+        private double[] crust;
+        internal WindowMotion Motion;
+        internal double LooseShare(int cell) { return 1 - 0.72 * crust[cell]; }
 
         internal readonly IntPtr Handle;
         internal Rect WindowBounds { get; private set; }
@@ -65,6 +68,7 @@ namespace SnowDesk
             Y = y;
             Width = width;
             Snow = snow;
+            if (crust == null || crust.Length != snow.Length) Array.Resize(ref crust, snow.Length);
             if (Visible == null || Visible.Length != snow.Length)
             {
                 Visible = new bool[snow.Length];
@@ -141,6 +145,7 @@ namespace SnowDesk
             double removed = Math.Min(Snow[cell], mass);
             if (removed <= 0) return 0;
             Snow[cell] -= removed;
+            if (Snow[cell] <= 0.001) crust[cell] = 0;
             total -= removed;
             dirty = true;
             return removed;
@@ -175,7 +180,10 @@ namespace SnowDesk
                 int upstream = cell - downwind;
                 double shelter = upstream >= 0 && upstream < Snow.Length && Visible[upstream]
                     ? Math.Max(0, Snow[upstream] - Snow[cell]) : 0;
-                double carried = strength * Math.Min(Snow[cell], 6) / (1 + 0.22 * shelter);
+                double center = CellCenter(cell);
+                double sheltered = center >= ShelteredLeft && center <= ShelteredRight ? Shelter : 0;
+                double carried = strength * Math.Min(Snow[cell], 6) * LooseShare(cell) /
+                    (1 + 0.22 * shelter + 1.8 * sheltered);
                 Remove(cell, Add(cell + downwind, Math.Min(Snow[cell], carried)));
             }
         }
@@ -247,6 +255,7 @@ namespace SnowDesk
             if (cell < 0 || cell >= Snow.Length || !Visible[cell] || mass <= 0) return 0;
             double placed = Math.Max(0, Math.Min(MaxDepth - Snow[cell], mass));
             if (placed <= 0) return 0;
+            crust[cell] *= Snow[cell] / (Snow[cell] + 2.4 * placed);
             Snow[cell] += placed;
             total += placed;
             for (int i = imprints.Count - 1; i >= 0; i--)
@@ -261,7 +270,9 @@ namespace SnowDesk
             return placed;
         }
 
-        internal void MeltAndSettle(double seconds)
+        internal double Shelter, ShelteredLeft, ShelteredRight;
+
+        internal void MeltAndSettle(double seconds, double melt = 1)
         {
             if (seconds <= 0) return;
             if (total <= 0.00001)
@@ -273,9 +284,10 @@ namespace SnowDesk
             {
                 double depth = Snow[cell];
                 if (depth <= 0) continue;
+                crust[cell] = Math.Min(1, crust[cell] + seconds * (0.017 + depth * 0.00045));
                 double surplus = Math.Max(0, depth - 17);
                 double rate = 0.008 + depth * 0.0013 + surplus * surplus * 0.00022;
-                Remove(cell, Math.Min(depth, rate * seconds));
+                Remove(cell, Math.Min(depth, rate * seconds * melt));
                 RelaxPair(cell);
             }
             for (int i = imprints.Count - 1; i >= 0; i--)

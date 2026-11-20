@@ -9,7 +9,7 @@ using Forms = System.Windows.Forms;
 
 namespace SnowDesk
 {
-    internal sealed class SnowField : DesktopScene
+    internal sealed class SnowField : DesktopScene, TravelingScene
     {
         private const int MaxFlakes = 600;
         private const int MaxLedges = 32;
@@ -18,7 +18,7 @@ namespace SnowDesk
         private const double Accumulation = 1.5;
         private static readonly SolidBrush[] FlakeBrushes =
         {
-            Brush(120, 220, 239, 255), Brush(175, 236, 247, 255), Brush(235, 255, 255, 255)
+            Brush(91, 206, 225, 242), Brush(167, 234, 245, 254), Brush(242, 255, 255, 255)
         };
         private static readonly Pen PileEdge = new Pen(Brush(87, 37, 66, 100), 0.9f);
         private static readonly Pen CrystalRay = new Pen(Brush(220, 238, 249, 255), 0.95f);
@@ -37,8 +37,13 @@ namespace SnowDesk
         private readonly bool animateDecorations;
         private readonly Icicles icicles;
         private readonly SnowLedge floor;
+        private readonly Snowman snowman = new Snowman();
+        public Func<TravelingParticle, bool> Send { private get; set; }
         private int flakeCount;
         private double elapsed;
+        private double winterSun;
+        private bool skyVisible = true;
+        private bool quiet;
         private double snowMaintenance, windTravel;
         private double gustTime, gustDirection = 1;
         private long lastGeometry;
@@ -55,7 +60,7 @@ namespace SnowDesk
         {
             internal double X, Y, VX, VY, Age, Mass;
             internal IntPtr Source;
-            internal bool LeavesRight;
+            internal bool LeavesRight, AirOnly;
         }
 
         private struct ReleasedSnow
@@ -79,7 +84,7 @@ namespace SnowDesk
             this.animateDecorations = animateDecorations;
             screen = new Rect(bounds.X, bounds.Y, bounds.Width, bounds.Height);
             workArea = new Rect(work.X, work.Y, work.Width, work.Height);
-            effects = new Decorations(bounds.Width, bounds.Height, SpillPlow, KickPowder, SprayPlow);
+            effects = new Decorations(bounds.Width, bounds.Height, SpillPlow, KickPowder, SprayPlow, DropBranch);
             icicles = new Icicles(screen, workArea);
             floor = new SnowLedge(IntPtr.Zero, screen, 0, screen.Height - 1, screen.Width);
             for (int cell = 0; cell < floor.Visible.Length; cell++) floor.SetVisible(cell, true);
@@ -87,9 +92,29 @@ namespace SnowDesk
         }
 
         public bool UsesWindowGeometry(Settings settings) { return settings.WindowLedges; }
+        public void Receive(TravelingParticle particle)
+        {
+            if (grains.Count >= MaxGrains) return;
+            grains.Add(new Grain { X = particle.X, Y = particle.Y, VX = particle.VX, VY = particle.VY,
+                Mass = Math.Max(0.14, particle.Mass), AirOnly = particle.Mass <= 0 });
+        }
+
+        internal TravelingParticle[] ThawPatches()
+        {
+            var patches = new List<TravelingParticle>(16);
+            for (int cell = 0; cell < floor.Snow.Length && patches.Count < 24; cell += 10)
+            {
+                double peak = 0;
+                for (int j = cell; j < Math.Min(cell + 10, floor.Snow.Length); j++) peak = Math.Max(peak, floor.Snow[j]);
+                if (peak > 1.5) patches.Add(new TravelingParticle { X = floor.CellCenter(cell) + 26, Y = floor.Y,
+                    Size = 48 + peak, Mass = Math.Min(17, peak) });
+            }
+            return patches.ToArray();
+        }
 
         public void UpdateLedges(List<Desktop.WindowBounds> windows)
         {
+            skyVisible = !windows.Exists(window => window.Bounds.Contains(screen.Right - 80, screen.Top + 64));
             icicles.UpdateWindows(windows);
             long now = Stopwatch.GetTimestamp();
             double scanTime = Math.Max(0.016, Math.Min(0.1, (double)(now - lastGeometry) / Stopwatch.Frequency));
@@ -113,6 +138,23 @@ namespace SnowDesk
                 double corner = fitsWorkArea ? 0 : windows[i].CornerRadius;
                 ledge.SetCorners(corner, bounds.Left - screen.Left, bounds.Right - screen.Left);
                 bool hasVisibleCells = false;
+                double shelter = 0, shelteredLeft = 0, shelteredRight = 0;
+                for (int upper = 0; upper < windows.Count; upper++)
+                {
+                    Rect shield = windows[upper].Bounds;
+                    double gap = bounds.Top - shield.Bottom;
+                    if (gap < -1 || gap > 160) continue;
+                    double overlap = Math.Min(bounds.Right, shield.Right) - Math.Max(bounds.Left, shield.Left);
+                    if (overlap <= 0) continue;
+                    double strength = Math.Min(1, overlap / 100) * (1 - Math.Max(0, gap) / 160);
+                    if (strength <= shelter) continue;
+                    shelter = strength;
+                    shelteredLeft = shield.Left - screen.Left;
+                    shelteredRight = shield.Right - screen.Left;
+                }
+                ledge.Shelter = shelter;
+                ledge.ShelteredLeft = shelteredLeft;
+                ledge.ShelteredRight = shelteredRight;
                 for (int cell = 0; cell < ledge.Visible.Length; cell++)
                 {
                     double x = screen.Left + ledge.CellCenter(cell);
@@ -172,15 +214,11 @@ namespace SnowDesk
                 piles.Add(handle, ledge);
                 return ledge;
             }
-            if (ledge.WindowBounds.Left == bounds.Left && ledge.WindowBounds.Width == bounds.Width &&
-                ledge.X == x && ledge.Y == y && ledge.Width == width) return ledge;
-
+            double loosened = ledge.Motion.Sample(ledge.WindowBounds, bounds, scanTime);
+            if (loosened < 0.003 && ledge.WindowBounds == bounds && ledge.X == x && ledge.Y == y && ledge.Width == width) return ledge;
             double shift = bounds.Width == ledge.WindowBounds.Width ? bounds.Left - ledge.WindowBounds.Left : 0;
-            double vertical = y - ledge.Y;
-            double travel = Math.Sqrt(shift * shift + vertical * vertical);
-            double loosened = 1 - Math.Exp(-travel / 90);
-            double vx = Clamp(shift / scanTime * 0.50, -390, 390);
-            double vy = Clamp(vertical / scanTime * 0.32, -100, 140);
+            double vx = Clamp(ledge.Motion.ThrowX * 0.50, -390, 390);
+            double vy = Clamp(ledge.Motion.ThrowY * 0.32, -100, 140);
             ShedLedge(ledge, bounds, x, y, width, loosened, shift, vx, vy);
             return ledge;
         }
@@ -273,6 +311,7 @@ namespace SnowDesk
         {
             if (seconds <= 0) return;
             elapsed += seconds;
+            quiet = settings.QuietScene;
             int density = settings.Density == 0 ? 88 : settings.Density == 1 ? 165 : 270;
             int target = (int)Math.Min(MaxFlakes, density * Math.Sqrt(screen.Width * screen.Height / 2073600.0));
             while (flakeCount < target)
@@ -289,15 +328,21 @@ namespace SnowDesk
             lastPointer = pointer;
             hasPointer = true;
             double decay = Math.Exp(-5.4 * seconds);
+            double depositScale = settings.DepositScale;
             for (int i = 0; i < flakeCount; i++)
             {
                 Flake flake = flakes[i];
                 double oldX = flake.X, oldY = flake.Y;
-                flake.X += (wind + flake.Drift + flake.PushX + 8 * Math.Sin(elapsed * 1.1 + i)) * seconds;
+                double vx = wind + flake.Drift + flake.PushX + 8 * Math.Sin(elapsed * 1.1 + i);
+                flake.X += vx * seconds;
                 flake.Y += (flake.Speed + flake.PushY) * seconds;
                 flake.PushX *= decay;
                 flake.PushY *= decay;
-                bool landed = Deposit(oldX, oldY, flake.X, flake.Y, (0.9 + flake.Radius * 0.65) * Accumulation, null) <= 0.001;
+                double mass = (0.9 + flake.Radius * 0.65) * Accumulation * depositScale;
+                bool landed = mass > 0 && Deposit(oldX, oldY, flake.X, flake.Y, mass, null) <= 0.001;
+                if (!landed && Send != null && (flake.X >= screen.Width || flake.X < 0))
+                    landed = Send(new TravelingParticle { X = flake.X, Y = flake.Y, VX = vx,
+                        VY = flake.Speed, Mass = mass, Size = flake.Radius });
                 if (flake.X < -6) flake.X += screen.Width + 12;
                 if (flake.X > screen.Width + 6) flake.X -= screen.Width + 12;
                 if (landed || flake.Y > screen.Height + 6)
@@ -311,17 +356,19 @@ namespace SnowDesk
             if (snowMaintenance >= 0.5)
             {
                 double averageWind = windTravel / snowMaintenance;
-                floor.MeltAndSettle(snowMaintenance);
+                floor.MeltAndSettle(snowMaintenance, settings.MeltScale);
                 floor.Drift(averageWind, snowMaintenance);
                 foreach (SnowLedge ledge in piles.Values)
                 {
-                    ledge.MeltAndSettle(snowMaintenance);
+                    ledge.MeltAndSettle(snowMaintenance, settings.MeltScale);
                     ledge.Drift(averageWind, snowMaintenance);
                 }
                 snowMaintenance = windTravel = 0;
             }
             if (animateDecorations) effects.Advance(seconds, elapsed, settings, ledges);
-            icicles.Advance(seconds, settings.Icicles, ledges);
+            snowman.Advance(seconds, settings.MeltScale);
+            winterSun = Math.Max(0, Math.Sin((elapsed - 21) * 0.046));
+            icicles.Advance(seconds, settings.Icicles && !settings.QuietScene, ledges, winterSun);
         }
 
         private Flake NewFlake(double y)
@@ -361,12 +408,12 @@ namespace SnowDesk
 
         private void SweepPointer(Desktop.Point start, Desktop.Point end, double seconds)
         {
-            double dx = (double)end.X - start.X, dy = (double)end.Y - start.Y;
-            double distance = Math.Sqrt(dx * dx + dy * dy);
-            if (distance < 1) return;
+            var motion = CursorImpulse.Measure(start, end, seconds);
+            double dx = motion.DX, dy = motion.DY, distance = motion.Distance;
+            if (distance < 1 || motion.Strength <= 0) return;
             double x = start.X - screen.Left, y = start.Y - screen.Top;
-            double speed = distance / Math.Max(0.008, seconds);
-            double impulse = Math.Min(0.94, distance / 28);
+            double speed = motion.Speed;
+            double impulse = 0.05 + motion.Strength * 0.82;
             double vx = Clamp(dx / seconds * 0.43, -480, 480);
             double vy = Clamp(dy / seconds * 0.27, -170, 160) - 42;
             double radius = 22 + Math.Min(27, speed / 38);
@@ -396,7 +443,18 @@ namespace SnowDesk
                     falloff *= falloff;
                     double depth = ledge.Snow[cell];
                     double surface = ledge.SurfaceAt(center);
-                    release.Add(center, surface, ledge.Remove(cell, depth * impulse * falloff));
+                    double loose = ledge.LooseShare(cell);
+                    double taken = ledge.Remove(cell, depth * impulse * falloff * (0.72 + 0.28 * loose));
+                    if (ledge == floor && speed < 1020 && animateDecorations && !quiet)
+                        taken -= snowman.Gather(x + dx, floor.Y, taken * (0.40 + (1 - loose) * 0.36));
+                    if (taken > 2 && loose < 0.50)
+                    {
+                        var chunk = new ReleasedSnow();
+                        chunk.Add(center, surface, taken * 0.48);
+                        Emit(ref chunk, ledge.Handle, vx * 0.59, vy * 0.60, 0.34);
+                        taken *= 0.52;
+                    }
+                    release.Add(center, surface, taken);
                     if (cell % 2 == 1) Emit(ref release, ledge.Handle, vx, vy);
                 }
                 Emit(ref release, ledge.Handle, vx, vy);
@@ -466,6 +524,13 @@ namespace SnowDesk
             Emit(ref powder, IntPtr.Zero, 46, -53);
         }
 
+        private void DropBranch(double x, double y, double mass)
+        {
+            var released = new ReleasedSnow();
+            released.Add(x, y, mass);
+            Emit(ref released, IntPtr.Zero, 11, 10, 0.36);
+        }
+
         private void Emit(ref ReleasedSnow release, IntPtr source, double vx, double vy, double scatter = 1,
             bool leavesRight = false)
         {
@@ -509,6 +574,9 @@ namespace SnowDesk
                 grain.VY = Math.Min(510, grain.VY + Gravity * seconds);
                 grain.X += grain.VX * seconds;
                 grain.Y += (oldVY + grain.VY) * 0.5 * seconds;
+                bool crossed = Send != null && (grain.X < 0 || grain.X >= screen.Width) &&
+                    Send(new TravelingParticle { X = grain.X, Y = grain.Y, VX = grain.VX, VY = grain.VY,
+                        Mass = grain.AirOnly ? 0 : grain.Mass });
                 if (!grain.LeavesRight && (grain.X <= 0 || grain.X >= screen.Width))
                 {
                     grain.X = Clamp(grain.X, 0.2, screen.Width - 0.2);
@@ -516,7 +584,8 @@ namespace SnowDesk
                 }
                 IntPtr? ignore = grain.LeavesRight || (grain.Age < 0.22 && grain.Source != IntPtr.Zero)
                     ? (IntPtr?)grain.Source : null;
-                grain.Mass = Deposit(oldX, oldY, grain.X, grain.Y, grain.Mass, ignore);
+                if (crossed) grain.Mass = 0;
+                else if (!grain.AirOnly) grain.Mass = Deposit(oldX, oldY, grain.X, grain.Y, grain.Mass, ignore);
                 if (grain.Mass <= 0.001 || grain.Y > screen.Height + 14 || (grain.LeavesRight && grain.X >= screen.Width + 4))
                 {
                     int last = grains.Count - 1;
@@ -529,9 +598,13 @@ namespace SnowDesk
 
         public void Draw(Canvas drawing)
         {
+            if (winterSun > 0.18 && skyVisible)
+                drawing.DrawArt(0, 0, 1, false, g => SummerArt.Sun(g, (float)screen.Width - 80, 64, 17,
+                    (winterSun - 0.18) * 0.42, elapsed));
             foreach (SnowLedge ledge in ledges) ledge.Draw(drawing, PileEdge);
             icicles.Draw(drawing);
             effects.Draw(drawing);
+            if (!quiet) snowman.Draw(drawing);
             for (int i = 0; i < flakeCount; i++)
             {
                 Flake flake = flakes[i];

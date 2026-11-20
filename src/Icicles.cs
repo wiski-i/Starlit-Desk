@@ -21,7 +21,8 @@ namespace SnowDesk
             internal int Slot;
             internal Rect Bounds;
             internal double X, Y, Length, Limit, Age, VisibleLength, VX, VY, Angle, Spin, BodyWidth;
-            internal bool Fragment;
+            internal bool Fragment, Drip;
+            internal double MeltCredit;
         }
 
         private struct Candidate
@@ -128,7 +129,7 @@ namespace SnowDesk
             shard.BodyWidth = anchor.BodyWidth;
         }
 
-        internal void Advance(double seconds, bool active, List<SnowLedge> ledges)
+        internal void Advance(double seconds, bool active, List<SnowLedge> ledges, double sunshine = 0)
         {
             enabled = active;
             if (!active)
@@ -142,7 +143,18 @@ namespace SnowDesk
                 shard.Age += seconds;
                 double maturity = shard.Length / shard.Limit;
                 double growth = (0.32 + (1 - maturity) * 0.42) * scale;
-                shard.Length = Math.Min(shard.Limit, shard.Length + growth * seconds);
+                double lit = sunshine * (0.34 + 0.66 * shard.X / screen.Width);
+                shard.Length = Math.Max(scale * 0.8, Math.Min(shard.Limit, shard.Length + (growth - 1.05 * lit) * seconds));
+                if (lit > 0.46 && shard.Length > 3 * scale && shard.Length < shard.VisibleLength)
+                {
+                    shard.MeltCredit += lit * seconds;
+                    if (shard.MeltCredit >= 1.12 && falling.Count < MaximumFalling)
+                    {
+                        shard.MeltCredit = 0;
+                        falling.Add(new Shard { X = shard.X, Y = shard.Y + shard.Length,
+                            Drip = true, Length = 1.6 * scale, BodyWidth = 0.8, VY = 28 * scale });
+                    }
+                }
                 if (shard.Length >= shard.Limit && shard.Age > 31 + shard.Limit / scale)
                 {
                     Break(shard, (shard.Slot % 2 == 0 ? -9 : 9) * scale);
@@ -178,7 +190,7 @@ namespace SnowDesk
                     shard.X > screen.Width + 25 || (shard.Fragment && shard.Age > 0.32))
                 {
                     falling.RemoveAt(i);
-                    if (hit && shard.Length > 4 * scale) ScatterChips(shard);
+                    if (hit && !shard.Drip && shard.Length > 4 * scale) ScatterChips(shard);
                 }
             }
         }
@@ -226,10 +238,17 @@ namespace SnowDesk
             foreach (Shard shard in falling)
             {
                 double length = shard.Length;
+                if (shard.Drip)
+                {
+                    canvas.DrawEllipse(DripColor, null, new Point(shard.X, shard.Y), length * 0.55, length);
+                    continue;
+                }
                 if (shard.Fragment) length *= Math.Max(0.25, 1 - shard.Age * 2.25);
                 canvas.DrawIcicle(shard.X, shard.Y, length, HalfWidth(shard, length), shard.Angle);
             }
         }
+
+        private static readonly System.Drawing.Brush DripColor = SnowField.Brush(182, 195, 232, 255);
 
         private double HalfWidth(Shard shard, double length)
         {

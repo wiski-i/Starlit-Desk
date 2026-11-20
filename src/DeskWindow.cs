@@ -141,7 +141,7 @@ namespace SnowDesk
                     AddSpring(extras, "Kırlangıçlar", SpringEffect.Birds);
                 }));
             themeCards.Add(DesktopTheme.Summer, BuildThemeCard("Yağmur ve yaz süsleri", "Yağmur yoğunluğu",
-                new[] { "Çisenti", "Sağanak", "Bardaktan boşanırcasına" }, "Pencerelerde su", null, extras =>
+                new[] { "Çisenti", "Sağanak", "Bardaktan boşanırcasına" }, "Pencerelerde su", "İmleçle suyu dağıt", extras =>
                 {
                     AddSummer(extras, "Simitli güneşlenen kız", SummerEffect.Bather);
                     AddSummer(extras, "Yağmurda koşan adam", SummerEffect.Runner);
@@ -158,6 +158,7 @@ namespace SnowDesk
                     AddAutumn(extras, "Sincap", AutumnEffect.Squirrel);
                     AddAutumn(extras, "Balkabakları", AutumnEffect.Pumpkins);
                 }));
+            themeCards.Add(DesktopTheme.Space, BuildSpaceCard());
             foreach (Control card in themeCards.Values) themeColumn.Controls.Add(card);
             var winterBody = (TableLayoutPanel)winter.Controls[0];
             var winterGrid = DeskStyle.Flow(2);
@@ -177,6 +178,7 @@ namespace SnowDesk
             AddCheck(snow, "Kenarlarda kar", () => settings.WindowLedges, app.SetWindowLedges, false);
             AddCheck(snow, "İmleçle karı dağıt", () => settings.CursorSweep, value => settings.CursorSweep = value);
             AddCheck(snow, "Rüzgâr", () => settings.Wind, value => settings.Wind = value);
+            snow.Controls.Add(DeskStyle.Copy("Yerdeki karı aynı noktaya süpürerek kardan adam yap."));
 
             var decorations = DeskStyle.Flow(1);
             winterGrid.Controls.Add(decorations, 1, 0);
@@ -188,13 +190,15 @@ namespace SnowDesk
             AddDecoration(decorations, "Teleferik", Effect.Gondola);
             AddCheck(decorations, "Buz sarkıtları", () => settings.Icicles, value => settings.Icicles = value);
 
-            screenCard = DeskStyle.Card("Ekranlar", 124);
+            body.Controls.Add(BuildAtmosphereCard());
+            screenCard = DeskStyle.Card("Ekran profilleri", 170);
             body.Controls.Add(screenCard);
             var screenBody = (TableLayoutPanel)screenCard.Controls[0];
-            screenBody.Controls.Add(DeskStyle.Copy("Efektin görüneceği ekranları seç."));
+            screenBody.Controls.Add(DeskStyle.Copy("Her ekranın teması ve yağış yoğunluğu ayrı seçilebilir."));
             screenList = new FlowLayoutPanel
             {
-                AutoSize = true, Dock = DockStyle.Top, BackColor = DeskStyle.Surface, Margin = new Padding(0, 4, 0, 0)
+                AutoSize = true, Dock = DockStyle.Top, BackColor = DeskStyle.Surface, Margin = new Padding(0, 4, 0, 0),
+                FlowDirection = FlowDirection.TopDown, WrapContents = false
             };
             screenBody.Controls.Add(screenList);
 
@@ -214,6 +218,7 @@ namespace SnowDesk
                 if (effects.SelectedItem is SnowAction) app.RunSnowAction((SnowAction)effects.SelectedItem);
                 else if (effects.SelectedItem is SummerAction) app.RunSummerAction((SummerAction)effects.SelectedItem);
                 else if (effects.SelectedItem is SeasonAction) app.RunSeasonAction((SeasonAction)effects.SelectedItem);
+                else if (effects.SelectedItem is SpaceAction) app.RunSpaceAction((SpaceAction)effects.SelectedItem);
             };
             actionRow.Controls.Add(play, 1, 0);
 
@@ -226,11 +231,11 @@ namespace SnowDesk
             syncing = true;
             try
             {
-                DesktopTheme selected = settings.Theme;
+                DesktopTheme selected = settings.ThemeFor("", DateTime.Today);
                 themes.SelectedItem = selected;
                 themeDetail.Text = selected.Description;
                 intro.Text = selected.Name;
-                status.Text = app.IsRunning ? "●  Efekt açık" : "○  Efekt duraklatıldı";
+                status.Text = app.IsRunning ? (app.BatteryProfileActive ? "●  Pil tasarrufu" : "●  Efekt açık") : "○  Efekt duraklatıldı";
                 pause.Text = app.IsRunning ? "Duraklat" : "Devam et";
                 UpdatePreview();
                 density.SelectedIndex = settings.Density;
@@ -245,6 +250,7 @@ namespace SnowDesk
                     if (selected == DesktopTheme.Summer) effects.Items.AddRange(SummerAction.All);
                     else if (selected == DesktopTheme.Autumn) effects.Items.AddRange(SeasonAction.Autumn);
                     else if (selected == DesktopTheme.Spring) effects.Items.AddRange(SeasonAction.Spring);
+                    else if (selected == DesktopTheme.Space) effects.Items.AddRange(SpaceAction.All);
                     else effects.Items.AddRange(SnowAction.All);
                     effects.SelectedIndex = 0;
                 }
@@ -258,7 +264,7 @@ namespace SnowDesk
         private void SyncScreens()
         {
             Screen[] screens = Screen.AllScreens;
-            screenCard.Visible = screens.Length > 1;
+            screenCard.Height = 87 + screens.Length * 54;
             string layout = string.Join("|", Array.ConvertAll(screens, item => item.DeviceName + item.Bounds));
             if (layout != screenLayout)
             {
@@ -269,23 +275,115 @@ namespace SnowDesk
                     string device = screen.DeviceName;
                     CheckBox check = DeskStyle.Toggle(Program.ScreenLabel(screen));
                     check.Tag = device;
-                    check.Margin = new Padding(0, 1, 18, 1);
+                    check.Margin = new Padding(0, 1, 10, 1);
                     check.CheckedChanged += delegate
                     {
                         if (!syncing) app.SetScreenShown(device, check.Checked);
                     };
-                    screenList.Controls.Add(check);
+                    var row = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+                    check.AutoSize = false;
+                    check.Size = new Size(245, 32);
+                    row.Controls.Add(check);
+                    var scene = DeskStyle.Select("Ekranın teması");
+                    scene.Width = 132;
+                    scene.Margin = new Padding(0, 0, 8, 0);
+                    scene.Items.Add("Genel tema");
+                    foreach (DesktopTheme theme in DesktopTheme.All) scene.Items.Add(theme);
+                    DesktopTheme storedTheme;
+                    scene.SelectedItem = settings.ScreenThemes.TryGetValue(device, out storedTheme) ? (object)storedTheme : "Genel tema";
+                    scene.SelectedIndexChanged += delegate { if (!syncing) app.SetScreenTheme(device, scene.SelectedItem as DesktopTheme); };
+                    row.Controls.Add(scene);
+                    var amount = DeskStyle.Select("Ekranın yağış yoğunluğu");
+                    amount.Width = 150;
+                    amount.Items.AddRange(new[] { "Genel yoğunluk", "Hafif", "Orta", "Yoğun" });
+                    int overrideDensity;
+                    amount.SelectedIndex = settings.ScreenDensities.TryGetValue(device, out overrideDensity) ? overrideDensity + 1 : 0;
+                    amount.SelectedIndexChanged += delegate { if (!syncing) app.SetScreenDensity(device, amount.SelectedIndex - 1); };
+                    row.Controls.Add(amount);
+                    screenList.Controls.Add(row);
                 }
             }
-            foreach (Control control in screenList.Controls)
-                ((CheckBox)control).Checked = settings.ShowsOn((string)control.Tag);
+            foreach (Control row in screenList.Controls)
+            {
+                var check = (CheckBox)row.Controls[0];
+                check.Checked = settings.ShowsOn((string)check.Tag);
+            }
+        }
+
+        private Control BuildAtmosphereCard()
+        {
+            var card = DeskStyle.Card("Atmosfer ve uygulama kuralları", 350);
+            var grid = DeskStyle.Flow(2);
+            ((TableLayoutPanel)card.Controls[0]).Controls.Add(grid);
+            var weather = DeskStyle.Flow(1);
+            weather.Margin = new Padding(0, 0, 12, 0);
+            var preferences = DeskStyle.Flow(1);
+            grid.Controls.Add(weather, 0, 0);
+            grid.Controls.Add(preferences, 1, 0);
+            AddPreference(weather, "Yüzeylerde birikim", () => settings.Accumulation, v => settings.Accumulation = v,
+                "Kapalı", "Hafif", "Dengeli", "Belirgin");
+            AddPreference(weather, "Erime ve kuruma", () => settings.Melt, v => settings.Melt = v,
+                "Yavaş", "Dengeli", "Hızlı");
+            AddPreference(weather, "Mevsim takvimi", () => settings.CalendarMode, v => settings.CalendarMode = v,
+                "Elle seç", "Otomatik · Kuzey", "Otomatik · Güney");
+            AddCheck(preferences, "Sakin sahne", () => settings.QuietScene, v => settings.QuietScene = v);
+            AddCheck(preferences, "Masaüstü simgelerinde birikim", () => settings.IconDust, v => settings.IconDust = v);
+            AddCheck(preferences, "Pilde tasarruf", () => settings.BatterySaver, v => settings.BatterySaver = v);
+            var pauseRule = RuleInput(preferences, "Efekti durduracak uygulamalar", settings.PausedApps);
+            var quietRule = RuleInput(preferences, "Efekti azaltacak uygulamalar", settings.QuietApps);
+            preferences.Controls.Add(DeskStyle.Copy(".exe adlarını noktalı virgülle ayır."));
+            var apply = DeskStyle.Button("Kuralları kaydet", false);
+            apply.Margin = new Padding(0, 4, 0, 0);
+            apply.Click += delegate
+            {
+                settings.PausedApps = Settings.AppList(pauseRule.Text);
+                settings.QuietApps = Settings.AppList(quietRule.Text);
+                app.SaveSettings();
+            };
+            preferences.Controls.Add(apply);
+            return card;
+        }
+
+        private static TextBox RuleInput(TableLayoutPanel panel, string label, string value)
+        {
+            panel.Controls.Add(DeskStyle.Copy(label));
+            var input = new TextBox
+            {
+                Text = value.Replace("|", "; "), AccessibleName = label, Dock = DockStyle.Top,
+                BackColor = DeskStyle.Input, ForeColor = DeskStyle.Text, BorderStyle = BorderStyle.None
+            };
+            var frame = new Panel { Height = 28, Dock = DockStyle.Top, BackColor = DeskStyle.Input,
+                Padding = new Padding(8, 5, 8, 0), Margin = new Padding(0, 2, 0, 4) };
+            frame.Controls.Add(input);
+            frame.Paint += (sender, e) =>
+            {
+                using (var outline = new Pen(input.Focused ? DeskStyle.Accent : DeskStyle.Border))
+                    e.Graphics.DrawRectangle(outline, 0, 0, frame.Width - 1, frame.Height - 1);
+            };
+            input.GotFocus += (sender, e) => frame.Invalidate();
+            input.LostFocus += (sender, e) => frame.Invalidate();
+            panel.Controls.Add(frame);
+            return input;
+        }
+
+        private void AddPreference(TableLayoutPanel panel, string title, Func<int> read, Action<int> write,
+            params object[] values)
+        {
+            var select = AddSelect(panel, title, true, values);
+            select.SelectedIndexChanged += delegate
+            {
+                if (syncing || select.SelectedIndex < 0) return;
+                write(select.SelectedIndex);
+                app.SaveSettings();
+            };
+            updateChecks.Add(() => select.SelectedIndex = read());
         }
 
         private void UpdatePreview()
         {
             if (themePreview != null)
-                themePreview.SetPreview(settings,
-                    foreground && Visible && app.IsRunning && WindowState != FormWindowState.Minimized);
+                themePreview.SetPreview(settings.ForScreen("", app.BatteryProfileActive),
+                    foreground && Visible && app.IsRunning && WindowState != FormWindowState.Minimized, app.BatteryProfileActive);
         }
 
         protected override void OnActivated(EventArgs e)
@@ -388,9 +486,40 @@ namespace SnowDesk
             return card;
         }
 
+        private Control BuildSpaceCard()
+        {
+            var card = DeskStyle.Card("Uzay görünümü", 291);
+            var grid = DeskStyle.Flow(2);
+            ((TableLayoutPanel)card.Controls[0]).Controls.Add(grid);
+            var sky = DeskStyle.Flow(1);
+            sky.Margin = new Padding(0, 0, 10, 0);
+            var details = DeskStyle.Flow(1);
+            grid.Controls.Add(sky, 0, 0);
+            grid.Controls.Add(details, 1, 0);
+            AddPreference(sky, "Gökyüzü", () => settings.SpaceLook, v => settings.SpaceLook = v, "Yörünge", "Derin Uzay");
+            AddPreference(sky, "Yıldız yoğunluğu", () => settings.Density, v => settings.Density = v, "Seyrek", "Orta", "Yoğun");
+            AddCheck(sky, "Pencerelerin arkasında", () => settings.SpaceOcclusion, v => settings.SpaceOcclusion = v);
+            AddCheck(sky, "Kozmik tozu imleçle savur", () => settings.CursorSweep, v => settings.CursorSweep = v);
+            AddSpace(details, "Hilalli gezegen", SpaceEffect.Planet);
+            AddSpace(details, "Uydu geçişi", SpaceEffect.Satellite);
+            AddSpace(details, "Seyrek meteorlar", SpaceEffect.Meteors);
+            AddSpace(details, "Gezegen aurorası", SpaceEffect.Aurora);
+            AddSpace(details, "Kozmik toz", SpaceEffect.Dust);
+            return card;
+        }
+
+        private void AddSpace(TableLayoutPanel panel, string title, SpaceEffect effect)
+        {
+            AddCheck(panel, title, () => (settings.Space & effect) != 0, enabled =>
+            {
+                if (enabled) settings.Space |= effect;
+                else settings.Space &= ~effect;
+            });
+        }
+
         private void AddAutumn(TableLayoutPanel panel, string title, AutumnEffect effect)
         {
-            AddCheck(panel, title, () => settings.Has(effect), enabled =>
+            AddCheck(panel, title, () => (settings.Autumn & effect) != 0, enabled =>
             {
                 if (enabled) settings.Autumn |= effect;
                 else settings.Autumn &= ~effect;
@@ -399,7 +528,7 @@ namespace SnowDesk
 
         private void AddSpring(TableLayoutPanel panel, string title, SpringEffect effect)
         {
-            AddCheck(panel, title, () => settings.Has(effect), enabled =>
+            AddCheck(panel, title, () => (settings.Spring & effect) != 0, enabled =>
             {
                 if (enabled) settings.Spring |= effect;
                 else settings.Spring &= ~effect;
@@ -408,7 +537,7 @@ namespace SnowDesk
 
         private void AddSummer(TableLayoutPanel panel, string title, SummerEffect effect)
         {
-            AddCheck(panel, title, () => settings.Has(effect), enabled =>
+            AddCheck(panel, title, () => (settings.Summer & effect) != 0, enabled =>
             {
                 if (enabled) settings.Summer |= effect;
                 else settings.Summer &= ~effect;
@@ -417,7 +546,7 @@ namespace SnowDesk
 
         private void AddDecoration(TableLayoutPanel panel, string title, Effect effect)
         {
-            AddCheck(panel, title, () => settings.Has(effect), enabled =>
+            AddCheck(panel, title, () => (settings.Effects & effect) != 0, enabled =>
             {
                 if (enabled) settings.Effects |= effect;
                 else settings.Effects &= ~effect;

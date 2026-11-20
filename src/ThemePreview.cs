@@ -38,14 +38,15 @@ namespace SnowDesk
         private static readonly List<Desktop.WindowBounds> NoWindows = new List<Desktop.WindowBounds>();
 
         private readonly DesktopScene snow;
-        private readonly Bitmap backdrop = CreateBackdrop();
+        private readonly Bitmap backdrop;
         private readonly Bitmap frame = new Bitmap(Viewport.Width, Viewport.Height, PixelFormat.Format32bppPArgb);
         private readonly Canvas canvas;
         private bool ledgesEnabled;
 
-        internal ScenePreview(Func<Rectangle, DesktopScene> createScene)
+        internal ScenePreview(Func<Rectangle, DesktopScene> createScene, bool space = false)
         {
             snow = createScene(Viewport);
+            backdrop = CreateBackdrop(space);
             canvas = new Canvas(frame);
             canvas.BeginFrame(Viewport.Width, Viewport.Height);
             canvas.DrawSnowLayer(backdrop, 0, 0);
@@ -54,9 +55,10 @@ namespace SnowDesk
 
         internal override void Advance(double seconds, Settings settings)
         {
-            if (ledgesEnabled != settings.WindowLedges)
+            bool needsWindows = snow.UsesWindowGeometry(settings);
+            if (ledgesEnabled != needsWindows)
             {
-                ledgesEnabled = settings.WindowLedges;
+                ledgesEnabled = needsWindows;
                 snow.UpdateLedges(ledgesEnabled ? WindowEdges : NoWindows);
             }
             snow.Advance(seconds, settings, default(Desktop.Point));
@@ -78,26 +80,30 @@ namespace SnowDesk
             };
         }
 
-        private static Bitmap CreateBackdrop()
+        private static Bitmap CreateBackdrop(bool space)
         {
             var bitmap = new Bitmap(Viewport.Width, Viewport.Height, PixelFormat.Format32bppPArgb);
             using (Graphics graphics = Graphics.FromImage(bitmap))
             using (var gradient = new LinearGradientBrush(Viewport,
-                Color.FromArgb(41, 22, 36), Color.FromArgb(70, 42, 68), LinearGradientMode.Horizontal))
+                space ? Color.FromArgb(9, 16, 31) : Color.FromArgb(41, 22, 36),
+                space ? Color.FromArgb(17, 26, 47) : Color.FromArgb(70, 42, 68), LinearGradientMode.Horizontal))
             using (var orbit = new Pen(Color.FromArgb(42, DeskStyle.Accent)))
             using (var star = new SolidBrush(Color.FromArgb(198, DeskStyle.Accent)))
             {
                 graphics.SmoothingMode = SmoothingMode.AntiAlias;
                 graphics.FillRectangle(gradient, Viewport);
-                graphics.DrawEllipse(orbit, 156, 27, 464, 174);
-                graphics.DrawEllipse(orbit, 189, 49, 413, 135);
-                DrawWindow(graphics, BackWindow, Color.FromArgb(63, 39, 65));
-                DrawWindow(graphics, FrontWindow, Color.FromArgb(49, 30, 52));
-                graphics.FillPolygon(star, new[]
+                if (!space)
                 {
-                    new Point(593, 42), new Point(596, 52), new Point(605, 56), new Point(596, 60),
-                    new Point(593, 70), new Point(590, 60), new Point(581, 56), new Point(590, 52)
-                });
+                    graphics.DrawEllipse(orbit, 156, 27, 464, 174);
+                    graphics.DrawEllipse(orbit, 189, 49, 413, 135);
+                    graphics.FillPolygon(star, new[]
+                    {
+                        new Point(593, 42), new Point(596, 52), new Point(605, 56), new Point(596, 60),
+                        new Point(593, 70), new Point(590, 60), new Point(581, 56), new Point(590, 52)
+                    });
+                }
+                DrawWindow(graphics, BackWindow, space ? Color.FromArgb(34, 45, 66) : Color.FromArgb(63, 39, 65));
+                DrawWindow(graphics, FrontWindow, space ? Color.FromArgb(23, 31, 51) : Color.FromArgb(49, 30, 52));
             }
             return bitmap;
         }

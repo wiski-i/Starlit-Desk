@@ -14,7 +14,7 @@ namespace SnowDesk
     /// their ends and is thrown off when a window is dragged or shaken, puddles on the taskbar edge and a
     /// rain/sun cycle that drives the characters in <see cref="SummerCast"/>.
     /// </summary>
-    internal sealed class SummerScene : DesktopScene
+    internal sealed class SummerScene : DesktopScene, TravelingScene
     {
         private const int MaxDrops = 520, MaxBeads = 420, MaxRipples = 90, MaxLedges = 32;
         private const double Gravity = 520;
@@ -41,6 +41,10 @@ namespace SnowDesk
         private long lastGeometry;
         private bool seeded, raining = true, ledgesOn = true;
         private double phaseLeft, intensity = 1, elapsed, sunTime, rainbow, sunGlow, gust, gustDirection = 1;
+        private double rainAge, depositScale = 1;
+        private Desktop.Point lastPointer;
+        private bool hasPointer;
+        public Func<TravelingParticle, bool> Send { private get; set; }
 
         private struct Drop
         {
@@ -132,13 +136,21 @@ namespace SnowDesk
             return settings.WindowLedges || settings.Has(SummerEffect.Rainbow);
         }
 
-        public void ResetPointer() { }
+        public void ResetPointer() { hasPointer = false; }
+
+        public void Receive(TravelingParticle particle)
+        {
+            if (beads.Count >= MaxBeads) return;
+            beads.Add(new Bead { X = particle.X, Y = particle.Y, VX = particle.VX, VY = particle.VY,
+                Mass = particle.Mass, Life = 3 });
+        }
 
         /// <summary>Starts a shower or sunshine right away (panel and tray actions).</summary>
         internal void SetWeather(bool rain)
         {
             raining = rain;
             sunTime = 0;
+            rainAge = 0;
             phaseLeft = rain ? 55 + random.NextDouble() * 20 : 34 + random.NextDouble() * 12;
             if (!rain) cast.OnSunshine();
         }
@@ -176,6 +188,7 @@ namespace SnowDesk
                 if (bounds.Top <= screen.Top + 2 || bounds.Top - screen.Top >= Ground - 12 || right - left < 32) continue;
                 WaterLedge ledge = Locate(windows[i].Handle, bounds, left - screen.Left, bounds.Top - screen.Top,
                     right - left, scanTime);
+                ledge.SetRim(windows[i].CornerRadius, bounds.Left - left, bounds.Right - left);
                 bool any = false;
                 for (int cell = 0; cell < ledge.Visible.Length; cell++)
                 {
@@ -215,15 +228,15 @@ namespace SnowDesk
                 ledges.Add(handle, ledge);
                 return ledge;
             }
-            if (ledge.X == x && ledge.Y == y && ledge.Width == width) return ledge;
+            double loosened = Math.Min(0.85, ledge.Motion.Sample(ledge.Window, bounds, scanTime) * 1.30);
+            if (ledge.Window == bounds && ledge.X == x && ledge.Y == y && ledge.Width == width && loosened <= 0.01) return ledge;
             double shift = bounds.Width == ledge.Window.Width ? bounds.Left - ledge.Window.Left : 0;
-            double vertical = y - ledge.Y;
-            double travel = Math.Sqrt(shift * shift + vertical * vertical);
-            double loosened = 1 - Math.Exp(-travel / 28);
-            double vx = Clamp(shift / scanTime * 0.55, -480, 480);
-            double vy = Clamp(vertical / scanTime * 0.35, -150, 170);
+            double vx = Clamp(ledge.Motion.ThrowX * 0.55, -480, 480);
+            double vy = Clamp(ledge.Motion.ThrowY * 0.35, -150, 170);
             if (loosened > 0.01)
                 ledge.Release(loosened, (px, py, mass) => Throw(px + shift * 0.25, py, mass, vx, vy - 30, handle));
+            if (width < ledge.Width)
+                ledge.Release(1, (px, py, mass) => Throw(px, py, mass, vx, 14, handle), x + width, double.MaxValue);
             ledge.Place(bounds, x, y, width);
             return ledge;
         }
@@ -267,6 +280,10 @@ namespace SnowDesk
             if (seconds <= 0) return;
             elapsed += seconds;
             ledgesOn = settings.WindowLedges;
+            depositScale = settings.DepositScale;
+            if (settings.CursorSweep && hasPointer) SweepWater(lastPointer, pointer, seconds);
+            hasPointer = true;
+            lastPointer = pointer;
             AdvanceWeather(seconds, settings);
             double wind = settings.Wind ? 24 + 32 * Math.Sin(elapsed * 0.27) : 0;
             if (gust > 0)
@@ -287,13 +304,40 @@ namespace SnowDesk
             cast.Advance(seconds, settings);
         }
 
+        private void SweepWater(Desktop.Point start, Desktop.Point end, double seconds)
+        {
+            var motion = CursorImpulse.Measure(start, end, seconds);
+            if (motion.Strength < 0.035) return;
+            double left = Math.Min(start.X, end.X) - screen.Left - 17 * Scale;
+            double right = Math.Max(start.X, end.X) - screen.Left + 17 * Scale;
+            double top = Math.Min(start.Y, end.Y) - screen.Top;
+            double bottom = Math.Max(start.Y, end.Y) - screen.Top;
+            double vx = Clamp(motion.DX / seconds * 0.46, -360, 360);
+            foreach (WaterLedge ledge in visibleLedges)
+                if (ledgesOn && top <= ledge.Y + 5 && bottom >= ledge.Y - 14)
+                    ledge.Release(motion.Strength * 0.34,
+                        (x, y, mass) => Throw(x, y, mass, vx, -18 - motion.Strength * 75, ledge.Handle), left, right);
+            if (top > Ground + 4 || bottom < Ground - 19 * Scale) return;
+            foreach (Pool pool in pools)
+            {
+                double touch = Clamp(end.X - screen.Left, left, right);
+                double surface = pool.SurfaceAt(touch, Ground, Scale);
+                if (double.IsNaN(surface)) continue;
+                if (ripples.Count < MaxRipples)
+                    ripples.Add(new Ripple { X = touch, Y = surface, Size = (4 + motion.Strength * 8) * Scale });
+                if (motion.Strength > 0.42) Splash(touch, surface, 2 + (int)(motion.Strength * 4), motion.Strength);
+            }
+        }
+
         private void AdvanceWeather(double seconds, Settings settings)
         {
             phaseLeft -= seconds * Pace;
             if (phaseLeft <= 0) SetWeather(!raining);
             if (!raining) sunTime += seconds * Pace;
+            else rainAge += seconds * Pace;
             double ease = 1 - Math.Exp(-seconds * Pace * 0.45);
-            intensity += ((raining ? 1 : 0) - intensity) * ease;
+            double shower = 0.23 + 0.77 * Math.Pow(Math.Max(0, Math.Sin(rainAge * 0.126)), 1.65);
+            intensity += ((raining ? shower : 0) - intensity) * ease;
             double rainbowTarget = !raining && sunTime < 24 && settings.Has(SummerEffect.Rainbow) ? 1 - intensity : 0;
             rainbow += (rainbowTarget - rainbow) * (1 - Math.Exp(-seconds * 0.8));
             sunGlow += ((raining || !settings.Has(SummerEffect.Rainbow) ? 0 : 1) - sunGlow) * (1 - Math.Exp(-seconds * 0.6));
@@ -307,9 +351,13 @@ namespace SnowDesk
             {
                 Drop drop = drops[i];
                 double oldX = drop.X, oldY = drop.Y;
-                drop.X += wind * (0.7 + drop.Layer * 0.2) * seconds;
+                double vx = wind * (0.7 + drop.Layer * 0.2);
+                drop.X += vx * seconds;
                 drop.Y += drop.Speed * seconds;
                 bool landed = drop.Layer > 0 && Land(oldY, drop.X, drop.Y, drop.Layer);
+                if (!landed && Send != null && (drop.X < 0 || drop.X >= Width))
+                    landed = Send(new TravelingParticle { X = drop.X, Y = drop.Y, VX = vx, VY = drop.Speed,
+                        Mass = drop.Layer <= 0 ? 0 : 0.5 * drop.Layer * depositScale });
                 if (landed || drop.Y > Ground + 4)
                 {
                     if (dropCount > target)
@@ -348,7 +396,7 @@ namespace SnowDesk
                     if (x < ledge.X || x >= ledge.X + ledge.Width || !ledge.VisibleAt(x)) continue;
                     double surface = ledge.SurfaceAt(x);
                     if (oldY > surface || y < surface) continue;
-                    ledge.Add(x, 0.5 * layer);
+                    if (depositScale > 0) ledge.Add(x, 0.5 * layer * depositScale);
                     if (random.NextDouble() < 0.4) Splash(x, surface, 2, 0.55);
                     return true;
                 }
@@ -369,10 +417,11 @@ namespace SnowDesk
         private void AdvanceWater(double seconds, Settings settings)
         {
             double rate = seconds * Pace;
-            double fill = 0.022 * intensity * (0.75 + settings.Density * 0.25);
+            double fill = 0.022 * intensity * (0.75 + settings.Density * 0.25) * depositScale;
             foreach (Pool pool in pools)
             {
-                pool.Volume += raining ? fill * rate * (pool.Pond ? 1.15 : 1) : -0.027 * rate;
+                double evaporation = (0.013 + 0.024 * (1 - pool.Volume)) * settings.MeltScale;
+                pool.Volume += raining && depositScale > 0 ? fill * rate * (pool.Pond ? 1.15 : 1) : -evaporation * rate;
                 pool.Volume -= pool.Drain * seconds;
                 pool.Volume = Math.Max(0, Math.Min(1, pool.Volume));
             }
@@ -383,8 +432,8 @@ namespace SnowDesk
                     ledge.Evaporate(WaterLedge.MaxDepth);
                     continue;
                 }
-                if (raining) ledge.Rain(0.14 * intensity * (0.7 + settings.Density * 0.3) * rate);
-                else ledge.Evaporate(0.11 * rate);
+                if (raining && depositScale > 0) ledge.Rain(0.14 * intensity * (0.7 + settings.Density * 0.3) * rate * depositScale);
+                else ledge.Evaporate(0.11 * rate * settings.MeltScale);
                 IntPtr source = ledge.Handle;
                 ledge.Flow(seconds, (x, y, mass) => Throw(x, y, mass, 0, 6, source));
             }
@@ -402,6 +451,8 @@ namespace SnowDesk
                 bead.X += bead.VX * seconds;
                 bead.Y += bead.VY * seconds;
                 bool done = bead.Age >= bead.Life || bead.Y > Height + 6 || bead.X < -20 || bead.X > Width + 20;
+                if (!done && Send != null && (bead.X < 0 || bead.X >= Width))
+                    done = Send(new TravelingParticle { X = bead.X, Y = bead.Y, VX = bead.VX, VY = bead.VY, Mass = bead.Mass });
                 if (!done && bead.Mass > 0) done = Deposit(oldY, ref bead);
                 else if (!done) done = bead.Y >= Ground;
                 if (done)
@@ -425,7 +476,7 @@ namespace SnowDesk
                     double surface = ledge.SurfaceAt(bead.X);
                     if (oldY > surface + 1 || bead.Y < surface) continue;
                     ledge.Add(bead.X, bead.Mass);
-                    if (bead.VY > 260) Splash(bead.X, surface, 2, 0.5);
+                    if (bead.VY > 165) Splash(bead.X, surface, 2 + (int)Math.Min(3, bead.Mass / 4), 0.55);
                     return true;
                 }
             if (bead.Y < Ground - 14 * Scale) return false;
