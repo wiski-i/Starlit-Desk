@@ -3,32 +3,28 @@ using System;
 namespace SnowDesk
 {
     /// <summary>
-    /// Autumn characters. A gardener rakes fallen leaves off the ground into a heap; a child later runs in and
-    /// jumps into it, throwing the leaves back into the air; a squirrel hops by to nibble an acorn; pumpkins sit
-    /// on the ground. Commands: 1 raker, 2 child, 3 squirrel.
+    /// Autumn characters. A gardener rakes fallen leaves off the ground into a heap and a child later jumps
+    /// into it; a street sweeper pushes a wheelie bin along and slowly sweeps the leaves into it; the tree,
+    /// acorns, squirrel and gales live in <see cref="AutumnGrove"/>.
+    /// Commands: 1 raker, 2 child, 3 squirrel, 4 tree, 5 gale, 6 sweeper.
     /// </summary>
     internal sealed class AutumnCast : ISeasonCast
     {
         private enum Stage { Away, Arriving, Busy, Leaving }
 
         private readonly SeasonScene scene;
-        private readonly double[] pumpkins;
-        private Stage raker = Stage.Away, kid = Stage.Away, squirrel = Stage.Away;
+        private readonly AutumnGrove grove;
+        private Stage raker = Stage.Away, kid = Stage.Away, sweeper = Stage.Away;
         private double clock, rakeX, rakeDirection = 1, rakeStep, rakeTarget, rakeTime, nextRaker = 30;
         private double heapX, heap, nextKid;
         private int heapSeed = 7;
         private double kidX, kidDirection = 1, kidStep, kidJump, kidFrom, kidTarget, kidSit;
-        private double squirrelX, squirrelDirection = 1, squirrelStep, squirrelStop, squirrelSit, nextSquirrel = 12;
-        private bool showPumpkins = true;
+        private double sweepX, sweepDirection = 1, sweepStep, sweepTimer, binFill, nextSweeper = 70;
 
         internal AutumnCast(SeasonScene scene)
         {
             this.scene = scene;
-            var random = scene.Random;
-            int count = scene.Width > 1400 * scene.Scale ? 3 : 2;
-            pumpkins = new double[count];
-            for (int i = 0; i < count; i++)
-                pumpkins[i] = scene.Width * (0.12 + 0.76 * (i + 0.3 + random.NextDouble() * 0.4) / count);
+            grove = new AutumnGrove(scene, ScatterHeap);
         }
 
         private double S { get { return scene.Scale; } }
@@ -37,19 +33,42 @@ namespace SnowDesk
         {
             if (command == 1) CallRaker(true);
             else if (command == 2) CallKid();
-            else if (command == 3) CallSquirrel();
+            else if (command == 6) CallSweeper();
+            else grove.Trigger(command);
         }
 
         public void Advance(double seconds, Settings settings)
         {
             clock += seconds * scene.Pace;
-            showPumpkins = settings.Has(AutumnEffect.Pumpkins);
+            grove.Advance(seconds, settings);
             if (settings.Has(AutumnEffect.Raker) && raker == Stage.Away && clock >= nextRaker) CallRaker(false);
             if (settings.Has(AutumnEffect.Kid) && kid == Stage.Away && heap > 0.45 && raker == Stage.Away && clock >= nextKid) CallKid();
-            if (settings.Has(AutumnEffect.Squirrel) && squirrel == Stage.Away && clock >= nextSquirrel) CallSquirrel();
+            if (settings.Has(AutumnEffect.Sweeper) && sweeper == Stage.Away && clock >= nextSweeper) CallSweeper();
             AdvanceRaker(seconds);
             AdvanceKid(seconds);
-            AdvanceSquirrel(seconds);
+            AdvanceSweeper(seconds);
+        }
+
+        /// <summary>A gale takes the raked heap with it.</summary>
+        private void ScatterHeap(double direction)
+        {
+            if (heap <= 0.05) return;
+            var random = scene.Random;
+            int count = (int)(heap * 40);
+            for (int i = 0; i < count; i++)
+                scene.Launch(heapX + (random.NextDouble() - 0.5) * 40 * S, scene.Ground - 8 * S, Leaf(),
+                    direction * (200 + random.NextDouble() * 160), -120 - random.NextDouble() * 160);
+            heap = 0;
+        }
+
+        private PieceLedge.Piece Leaf()
+        {
+            var random = scene.Random;
+            return new PieceLedge.Piece
+            {
+                Kind = (byte)random.Next(3), Tint = (byte)random.Next(5), Size = (float)((15 + random.NextDouble() * 8) * S),
+                Angle = (float)(random.NextDouble() * 360)
+            };
         }
 
         private void CallRaker(bool forced)
@@ -156,63 +175,63 @@ namespace SnowDesk
             var random = scene.Random;
             int burst = (int)(heap * 46);
             for (int i = 0; i < burst; i++)
-            {
-                var piece = new PieceLedge.Piece
-                {
-                    Kind = (byte)random.Next(3), Tint = (byte)random.Next(5), Size = (float)((10 + random.NextDouble() * 6) * S),
-                    Angle = (float)(random.NextDouble() * 360)
-                };
-                scene.Launch(kidX + (random.NextDouble() - 0.5) * 40 * S, scene.Ground - 6 * S, piece,
+                scene.Launch(kidX + (random.NextDouble() - 0.5) * 40 * S, scene.Ground - 6 * S, Leaf(),
                     (random.NextDouble() - 0.5) * 300, -180 - random.NextDouble() * 240);
-            }
             heap = 0;
             double reach = 60 * S;
             scene.GroundPile.Lift(kidX - reach, kidX + reach, 0.8, random,
                 (x, y, piece) => scene.Launch(x, y, piece, (x - kidX) * 3, -160 - random.NextDouble() * 200));
         }
 
-        private void CallSquirrel()
+        private void CallSweeper()
         {
-            if (squirrel != Stage.Away) return;
-            nextSquirrel = clock + 30 + scene.Random.NextDouble() * 25;
-            squirrelDirection = scene.Random.Next(2) == 0 ? -1 : 1;
-            squirrelX = squirrelDirection > 0 ? -20 * S : scene.Width + 20 * S;
-            squirrelStop = scene.Width * (0.2 + scene.Random.NextDouble() * 0.6);
-            squirrel = Stage.Arriving;
+            if (sweeper != Stage.Away) return;
+            nextSweeper = clock + 80 + scene.Random.NextDouble() * 40;
+            sweepDirection = scene.Random.Next(2) == 0 ? -1 : 1;
+            sweepX = sweepDirection > 0 ? -50 * S : scene.Width + 50 * S;
+            binFill = 0;
+            sweepTimer = 2.4;
+            sweeper = Stage.Arriving;
         }
 
-        private void AdvanceSquirrel(double dt)
+        /// <summary>The sweeper crosses the screen in short walks, stopping to sweep the leaves around him into the bin.</summary>
+        private void AdvanceSweeper(double dt)
         {
-            if (squirrel == Stage.Away) return;
-            if (squirrel == Stage.Busy)
+            if (sweeper == Stage.Away) return;
+            sweepTimer -= dt;
+            if (sweeper == Stage.Arriving)
             {
-                squirrelSit -= dt;
-                squirrelStep += dt;
-                if (squirrelSit <= 0) squirrel = Stage.Leaving;
+                sweepX += sweepDirection * 52 * S * dt;
+                sweepStep += dt * 2.2;
+                bool beyond = sweepDirection > 0 ? sweepX > scene.Width + 70 * S : sweepX < -70 * S;
+                if (beyond)
+                {
+                    sweeper = Stage.Away;
+                    return;
+                }
+                bool onScreen = sweepX > 30 * S && sweepX < scene.Width - 30 * S;
+                if (sweepTimer > 0 || !onScreen) return;
+                sweeper = Stage.Busy;
+                sweepTimer = 3.6;
                 return;
             }
-            squirrelX += squirrelDirection * 150 * S * dt;
-            squirrelStep += dt * 3.6;
-            if (squirrel == Stage.Arriving && (squirrelX - squirrelStop) * squirrelDirection >= 0)
-            {
-                squirrel = Stage.Busy;
-                squirrelSit = 3.5;
-            }
-            else if (squirrelX < -40 * S || squirrelX > scene.Width + 40 * S) squirrel = Stage.Away;
+            sweepStep += dt;
+            double broom = sweepX - sweepDirection * 18 * S, reach = 70 * S;
+            int swept = scene.GroundPile.Lift(broom - reach, broom + reach, dt * 0.7, scene.Random, null);
+            binFill = Math.Min(1, binFill + swept * 0.006);
+            if (sweepTimer > 0) return;
+            sweeper = Stage.Arriving;
+            sweepTimer = 2.2;
         }
 
         public void DrawBack(Canvas canvas)
         {
-            if (!showPumpkins) return;
-            for (int i = 0; i < pumpkins.Length; i++)
-            {
-                float size = i % 2 == 0 ? 1 : 0.78f;
-                canvas.DrawArt(pumpkins[i], scene.Ground, S, i == 1, g => SeasonArt.Pumpkin(g, size));
-            }
+            grove.DrawBack(canvas);
         }
 
         public void DrawFront(Canvas canvas)
         {
+            grove.DrawFront(canvas);
             if (heap > 0.01)
             {
                 double amount = heap;
@@ -226,11 +245,11 @@ namespace SnowDesk
                 double step = rakeStep;
                 canvas.DrawArt(rakeX, scene.Ground, S, rakeDirection < 0, g => AutumnArt.Raker(g, step, busy));
             }
-            if (squirrel != Stage.Away)
+            if (sweeper != Stage.Away)
             {
-                bool sitting = squirrel == Stage.Busy;
-                double step = squirrelStep;
-                canvas.DrawArt(squirrelX, scene.Ground, S, squirrelDirection < 0, g => AutumnArt.Squirrel(g, step, sitting));
+                bool sweeping = sweeper == Stage.Busy;
+                double step = sweepStep, fill = binFill;
+                canvas.DrawArt(sweepX, scene.Ground, S, sweepDirection < 0, g => AutumnArt.Sweeper(g, step, sweeping, fill));
             }
             if (kid != Stage.Away)
             {

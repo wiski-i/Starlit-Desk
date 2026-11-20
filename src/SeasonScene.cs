@@ -42,7 +42,7 @@ namespace SnowDesk
         private long lastGeometry;
         private bool seeded, hasPointer, ledgesOn = true;
         private Desktop.Point lastPointer;
-        private double elapsed, gust, gustDirection = 1, nextGust = 9;
+        private double elapsed, gust, gustDirection = 1, nextGust = 9, gale;
 
         private struct Flake
         {
@@ -93,6 +93,20 @@ namespace SnowDesk
         public bool UsesWindowGeometry(Settings settings) { return settings.WindowLedges; }
 
         public void ResetPointer() { hasPointer = false; }
+
+        /// <summary>Strength of a running gale, 0..1, and the way it blows (-1 or 1).</summary>
+        internal double GaleStrength { get; private set; }
+        internal double GaleDirection { get; private set; }
+
+        /// <summary>
+        /// A storm-force wind for a few seconds: it strips most pieces off the ground and the window tops and
+        /// carries them off the screen.
+        /// </summary>
+        internal void Gale(double direction)
+        {
+            gale = 5;
+            GaleDirection = direction < 0 ? -1 : 1;
+        }
 
         internal void Gust()
         {
@@ -176,6 +190,14 @@ namespace SnowDesk
             });
         }
 
+        /// <summary>Something hit the ground at x: nearby fallen pieces jump up.</summary>
+        internal void Splash(double x, double y)
+        {
+            double reach = 30 * Scale;
+            ground.Lift(x - reach, x + reach, 0.6, random,
+                (px, py, piece) => Launch(px, py, piece, (px - x) * 3, -90 - random.NextDouble() * 90));
+        }
+
         public void Advance(double seconds, Settings settings, Desktop.Point pointer)
         {
             if (seconds <= 0) return;
@@ -211,6 +233,18 @@ namespace SnowDesk
                 foreach (PieceLedge ledge in visibleLedges)
                     ledge.Lift(double.MinValue, double.MaxValue, chance, random,
                         (x, y, piece) => Launch(x, y, piece, gustDirection * 140, -60));
+            }
+            GaleStrength = 0;
+            if (gale > 0)
+            {
+                gale = Math.Max(0, gale - seconds);
+                GaleStrength = Math.Sin(gale * Math.PI / 5);
+                wind += GaleStrength * 430 * GaleDirection;
+                double chance = GaleStrength * seconds * 1.4;
+                double push = GaleDirection * 320;
+                ground.Lift(double.MinValue, double.MaxValue, chance * 0.6, random, (x, y, piece) => Launch(x, y, piece, push, -150));
+                foreach (PieceLedge ledge in visibleLedges)
+                    ledge.Lift(double.MinValue, double.MaxValue, chance, random, (x, y, piece) => Launch(x, y, piece, push, -110));
             }
             Wind = wind;
         }
@@ -254,6 +288,14 @@ namespace SnowDesk
                 flake.Y += flake.VY * seconds;
                 flake.Angle += (flake.Spin + flake.VX * 0.6) * seconds;
                 flake.Flip += flake.FlipRate * seconds;
+                bool outside = flake.X < -30 || flake.X > Width + 30;
+                if (outside && !flake.Ambient)
+                {
+                    // Pieces blown off the screen are gone; only the steady fall wraps around.
+                    flakes[i] = flakes[flakes.Count - 1];
+                    flakes.RemoveAt(flakes.Count - 1);
+                    continue;
+                }
                 if (flake.X < -30) flake.X += Width + 60;
                 else if (flake.X > Width + 30) flake.X -= Width + 60;
                 if (flake.VY > 0 && Settle(oldY, ref flake))

@@ -39,7 +39,7 @@ namespace SnowDesk
             Font = new Font("Segoe UI", 10f);
             BackColor = DeskStyle.Background;
             ForeColor = DeskStyle.Text;
-            ClientSize = new Size(884, Screen.AllScreens.Length > 1 ? 846 : 708);
+            ClientSize = new Size(884, Screen.AllScreens.Length > 1 ? 924 : 786);
             MinimumSize = new Size(770, 465);
             FormClosing += KeepInTray;
 
@@ -139,6 +139,9 @@ namespace SnowDesk
                     AddSpring(extras, "Arılar", SpringEffect.Bees);
                     AddSpring(extras, "Çiçek sulayan bahçıvan", SpringEffect.Gardener);
                     AddSpring(extras, "Kırlangıçlar", SpringEffect.Birds);
+                    AddSpring(extras, "Sakura ağacı ve kovan", SpringEffect.Tree);
+                    AddSpring(extras, "Kovanı ezen araba", SpringEffect.Car);
+                    AddSpring(extras, "Arıcı", SpringEffect.Beekeeper);
                 }));
             themeCards.Add(DesktopTheme.Summer, BuildThemeCard("Yağmur ve yaz süsleri", "Yağmur yoğunluğu",
                 new[] { "Çisenti", "Sağanak", "Bardaktan boşanırcasına" }, "Pencerelerde su", null, extras =>
@@ -155,10 +158,20 @@ namespace SnowDesk
                 {
                     AddAutumn(extras, "Yaprak toplayan tırmıkçı", AutumnEffect.Raker);
                     AddAutumn(extras, "Yığına atlayan çocuk", AutumnEffect.Kid);
-                    AddAutumn(extras, "Sincap", AutumnEffect.Squirrel);
-                    AddAutumn(extras, "Balkabakları", AutumnEffect.Pumpkins);
+                    AddAutumn(extras, "Sonbahar ağacı", AutumnEffect.Tree);
+                    AddAutumn(extras, "Palamut kaçıran sincap", AutumnEffect.Squirrel);
+                    AddAutumn(extras, "Ara sıra fırtına", AutumnEffect.Gale);
+                    AddAutumn(extras, "Çöpçü", AutumnEffect.Sweeper);
                 }));
-            foreach (Control card in themeCards.Values) themeColumn.Controls.Add(card);
+            // Cards grow with their list of pieces; the row keeps both columns the same height.
+            int tallest = general.Height;
+            foreach (Control card in themeCards.Values)
+            {
+                themeColumn.Controls.Add(card);
+                tallest = Math.Max(tallest, card.Height);
+            }
+            general.Height = tallest;
+            foreach (Control card in themeCards.Values) card.Height = tallest;
             var winterBody = (TableLayoutPanel)winter.Controls[0];
             var winterGrid = DeskStyle.Flow(2);
             winterGrid.ColumnStyles[0] = new ColumnStyle(SizeType.Percent, 46);
@@ -385,6 +398,7 @@ namespace SnowDesk
             grid.Controls.Add(pieces, 1, 0);
             pieces.Controls.Add(DeskStyle.Copy("Süslemeler"));
             extras(pieces);
+            card.Height = Math.Max(card.Height, 112 + 32 * (pieces.Controls.Count - 1));
             return card;
         }
 

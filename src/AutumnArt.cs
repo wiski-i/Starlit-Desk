@@ -27,6 +27,17 @@ namespace SnowDesk
         private static readonly Brush Eye = Ink(40, 32, 32);
         private static readonly Brush Glint = new SolidBrush(Color.FromArgb(230, 255, 255, 255));
         private static readonly Brush Blush = new SolidBrush(Color.FromArgb(80, 232, 120, 110));
+        private static readonly Brush Uniform = DecorationArt.Ramp(-56, -28, Color.FromArgb(70, 84, 120), Color.FromArgb(40, 50, 78));
+        private static readonly Brush Navy = Ink(44, 54, 84);
+        private static readonly Brush Vest = DecorationArt.Ramp(-56, -30, Color.FromArgb(255, 150, 52), Color.FromArgb(226, 98, 30));
+        private static readonly Brush Bristle = Ink(204, 168, 96);
+        private static readonly Brush BinFill = DecorationArt.Ramp(-32, -4, Color.FromArgb(86, 150, 96), Color.FromArgb(46, 98, 62));
+        private static readonly Brush BinLid = Ink(40, 86, 54);
+        private static readonly Pen Reflect = Line(Color.FromArgb(230, 236, 240, 236), 1.4f);
+        private static readonly GraphicsPath VestShape = DecorationArt.RoundedPolygon(new[] {
+            new PointF(-6.4f, -53), new PointF(-2, -53), new PointF(1, -47), new PointF(4, -53), new PointF(7.6f, -53.4f),
+            new PointF(8.6f, -42), new PointF(8, -31), new PointF(-7.4f, -30), new PointF(-8, -42)
+        }, 0.2f);
         private static readonly Pen Crease = Line(Color.FromArgb(110, 36, 35, 40), 0.8f);
         private static readonly Pen Plaid = Line(Color.FromArgb(110, 40, 18, 22), 0.9f);
         private static readonly Pen PlaidLight = Line(Color.FromArgb(70, 255, 220, 200), 0.6f);
@@ -165,8 +176,87 @@ namespace SnowDesk
             g.DrawEllipse(Crease, -2.4f, -61.4f, 5, 5);
         }
 
+        /// <summary>
+        /// A street sweeper in a hi-vis vest pushing a green wheelie bin. Sweeping, the broom swings at the
+        /// ground; <paramref name="fill"/> 0..1 shows leaves heaping up in the bin.
+        /// </summary>
+        internal static void Sweeper(Graphics g, double phase, bool sweeping, double fill)
+        {
+            float swing = sweeping ? 0 : (float)Math.Cos(phase * Math.PI);
+            Bin(g, 24, fill);
+            Leg(g, Navy, -swing * 8, 0);
+            Leg(g, Navy, swing * 8, 0);
+            float stroke = sweeping ? (float)Math.Sin(phase * 3.4) : 0;
+            g.DrawLine(Handle, -2 + stroke * 2, -40, -18 + stroke * 10, -3);
+            g.FillEllipse(Bristle, -24 + stroke * 10, -5, 12, 5);
+            g.DrawEllipse(Crease, -24 + stroke * 10, -5, 12, 5);
+            g.FillPath(Uniform, Shirt);
+            g.FillPath(Vest, VestShape);
+            g.DrawLine(Reflect, -7, -40, 8, -40.4f);
+            g.DrawLine(Reflect, -7, -35, 8, -35.4f);
+            g.DrawPath(Crease, Shirt);
+            SummerArt.Taper(g, Uniform, 4.6f, 3.6f, new PointF(-2, -52), new PointF(-4 + stroke * 2, -44), new PointF(-2 + stroke * 2, -38));
+            SummerArt.Taper(g, Uniform, 4.6f, 3.6f, new PointF(4, -52), new PointF(12, -44), new PointF(17, -40));
+            g.FillEllipse(Skin, 15.4f, -41.8f, 3.6f, 3.6f);
+            g.FillEllipse(Skin, -3.6f + stroke * 2, -39.8f, 3.6f, 3.6f);
+            g.FillRectangle(Skin, -1, -59.6f, 4, 4);
+            g.FillEllipse(Skin, -5, -71, 12.6f, 13);
+            g.DrawEllipse(Crease, -5, -71, 12.6f, 13);
+            g.FillEllipse(Eye, 4, -65.6f, 1.6f, 1.8f);
+            g.FillEllipse(Blush, 3, -62.8f, 3, 1.6f);
+            g.DrawArc(Crease, 3.4f, -61.8f, 3, 1.6f, 10, 150);
+            using (var cap = new GraphicsPath())
+            {
+                cap.AddBezier(-6, -66, -6.6f, -75, 7, -76, 7.6f, -67);
+                cap.AddLine(7.6f, -67, 13, -66);
+                cap.AddLine(13, -66, -6, -66);
+                cap.CloseFigure();
+                g.FillPath(Vest, cap);
+                g.DrawPath(Crease, cap);
+            }
+        }
+
+        private static void Bin(Graphics g, float x, double fill)
+        {
+            if (fill > 0.15)
+            {
+                var random = new Random(5);
+                int leaves = (int)(fill * 9);
+                for (int i = 0; i < leaves; i++)
+                    SeasonArt.Piece(g, Season.Autumn, (byte)(i % 3), (byte)(i % 5), 9, (float)(random.NextDouble() * 360), 1,
+                        x - 7 + (float)random.NextDouble() * 14, -32 - (float)random.NextDouble() * 5 * (float)fill, false);
+            }
+            using (GraphicsPath body = DecorationArt.RoundedPolygon(new[] {
+                new PointF(x - 9, -32), new PointF(x + 9, -32), new PointF(x + 8, -4), new PointF(x - 8, -4)
+            }, 0.12f))
+            {
+                g.FillPath(BinFill, body);
+                g.DrawPath(Crease, body);
+            }
+            g.FillRectangle(BinLid, x - 10, -34, 20, 3);
+            g.DrawLine(Crease, x - 5, -26, x - 5, -8);
+            g.DrawLine(Crease, x + 5, -26, x + 5, -8);
+            g.FillEllipse(Navy, x - 10, -6, 6, 6);
+        }
+
+        /// <summary>An acorn standing on (0, 0).</summary>
+        internal static void DrawAcorn(Graphics g)
+        {
+            g.FillEllipse(Acorn, -3, -8, 6, 8);
+            g.DrawEllipse(Crease, -3, -8, 6, 8);
+            g.FillEllipse(AcornCap, -3.4f, -9.6f, 6.8f, 3.6f);
+            g.DrawLine(Crease, 0, -9.6f, 0.6f, -11.4f);
+            g.FillEllipse(Glint, -1.8f, -6.4f, 1.2f, 2);
+        }
+
         /// <summary>A squirrel: hopping when <paramref name="sitting"/> is false, otherwise upright nibbling an acorn.</summary>
         internal static void Squirrel(Graphics g, double phase, bool sitting)
+        {
+            Squirrel(g, phase, sitting, false);
+        }
+
+        /// <summary>A squirrel; <paramref name="carrying"/> holds an acorn in its mouth while it runs.</summary>
+        internal static void Squirrel(Graphics g, double phase, bool sitting, bool carrying)
         {
             float bound = sitting ? 0 : (float)Math.Abs(Math.Sin(phase * Math.PI));
             g.TranslateTransform(0, -bound * 7);
@@ -194,6 +284,11 @@ namespace SnowDesk
             g.FillEllipse(Glint, 9.9f, -12.4f, 0.6f, 0.6f);
             g.FillEllipse(Eye, 12.2f, -10.6f, 1.2f, 1);
             g.DrawLine(Whisker, 12.6f, -10, 15.6f, -11);
+            if (carrying)
+            {
+                g.FillEllipse(Acorn, 11.4f, -11, 5, 6);
+                g.FillEllipse(AcornCap, 11, -12.4f, 5.8f, 3);
+            }
             g.Restore(state);
             if (sitting)
             {

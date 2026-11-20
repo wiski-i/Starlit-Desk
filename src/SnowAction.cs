@@ -33,14 +33,20 @@ namespace SnowDesk
     {
         internal static readonly SeasonAction[] Autumn =
         {
+            new SeasonAction("Fırtına çıkar", scene => scene.Cast.Trigger(5)),
             new SeasonAction("Rüzgâr estir", scene => scene.Gust()),
+            new SeasonAction("Yeni ağaç düşür", scene => scene.Cast.Trigger(4)),
+            new SeasonAction("Sincaba palamut düşür", scene => scene.Cast.Trigger(3)),
             new SeasonAction("Tırmıkçıyı çağır", scene => scene.Cast.Trigger(1)),
             new SeasonAction("Çocuğu yaprağa atlat", scene => scene.Cast.Trigger(2)),
-            new SeasonAction("Sincabı gönder", scene => scene.Cast.Trigger(3))
+            new SeasonAction("Çöpçüyü çağır", scene => scene.Cast.Trigger(6))
         };
 
         internal static readonly SeasonAction[] Spring =
         {
+            new SeasonAction("Arabayı gönder", scene => scene.Cast.Trigger(5)),
+            new SeasonAction("Sakura ağacı düşür", scene => scene.Cast.Trigger(4)),
+            new SeasonAction("Arıcıyı çağır", scene => scene.Cast.Trigger(6)),
             new SeasonAction("Kelebek sürüsü", scene => scene.Cast.Trigger(1)),
             new SeasonAction("Bahçıvanı çağır", scene => scene.Cast.Trigger(2)),
             new SeasonAction("Kırlangıçları gönder", scene => scene.Cast.Trigger(3)),

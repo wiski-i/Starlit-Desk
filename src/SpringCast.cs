@@ -6,8 +6,8 @@ namespace SnowDesk
     /// <summary>
     /// Spring characters. A garden along the ground grows from sprouts into tulips, daisies and crocuses and
     /// sways in the wind; butterflies settle on open flowers and flee the cursor; bees hop between blooms; a
-    /// gardener waters the least grown flower; swallows cross the sky. Commands: 1 butterflies, 2 gardener,
-    /// 3 swallows.
+    /// gardener waters the least grown flower; swallows cross the sky; a cherry tree with a hive plays out
+    /// <see cref="SpringOrchard"/>. Commands: 1 butterflies, 2 gardener, 3 swallows, 4 tree, 5 car, 6 beekeeper.
     /// </summary>
     internal sealed class SpringCast : ISeasonCast
     {
@@ -26,6 +26,7 @@ namespace SnowDesk
         }
 
         private readonly SeasonScene scene;
+        private readonly SpringOrchard orchard;
         private readonly List<Bloom> garden = new List<Bloom>();
         private readonly List<Flyer> butterflies = new List<Flyer>();
         private readonly List<Flyer> bees = new List<Flyer>();
@@ -38,14 +39,22 @@ namespace SnowDesk
         internal SpringCast(SeasonScene scene)
         {
             this.scene = scene;
+            orchard = new SpringOrchard(scene);
             var random = scene.Random;
-            double spacing = 46 * scene.Scale;
-            for (double x = spacing * 0.6; x < scene.Width - spacing * 0.4; x += spacing * (0.7 + random.NextDouble() * 0.7))
-                garden.Add(new Bloom
-                {
-                    X = x, Grow = 0.15 + random.NextDouble() * 0.75, Rate = 0.006 + random.NextDouble() * 0.01,
-                    Kind = random.Next(3), Tint = random.Next(3), Seed = random.Next(10000)
-                });
+            // A few small beds with bare ground between them, rather than a wall of flowers.
+            int beds = Math.Max(2, (int)(scene.Width / (560 * scene.Scale)));
+            for (int bed = 0; bed < beds; bed++)
+            {
+                double center = scene.Width * (bed + 0.25 + random.NextDouble() * 0.5) / beds;
+                int count = 2 + random.Next(3);
+                for (int i = 0; i < count; i++)
+                    garden.Add(new Bloom
+                    {
+                        X = center + (i - (count - 1) * 0.5) * (24 + random.NextDouble() * 10) * scene.Scale,
+                        Grow = 0.15 + random.NextDouble() * 0.75, Rate = 0.006 + random.NextDouble() * 0.01,
+                        Kind = random.Next(3), Tint = random.Next(3), Seed = random.Next(10000)
+                    });
+            }
         }
 
         private double S { get { return scene.Scale; } }
@@ -55,12 +64,14 @@ namespace SnowDesk
             if (command == 1) for (int i = 0; i < 3; i++) AddButterfly(true);
             else if (command == 2) CallGardener();
             else if (command == 3) SendBirds();
+            else orchard.Trigger(command);
         }
 
         public void Advance(double seconds, Settings settings)
         {
             clock += seconds * scene.Pace;
             showGarden = settings.Has(SpringEffect.Garden);
+            orchard.Advance(seconds, settings);
             foreach (Bloom bloom in garden) bloom.Grow = Math.Min(1, bloom.Grow + bloom.Rate * seconds * scene.Pace);
             int wantButterflies = settings.Has(SpringEffect.Butterflies) ? 3 : 0;
             while (butterflies.Count < wantButterflies) AddButterfly(false);
@@ -99,6 +110,15 @@ namespace SnowDesk
         {
             var random = scene.Random;
             flyer.Flower = -1;
+            double hiveX, hiveY;
+            if (flowersOnly && random.NextDouble() < 0.35 && orchard.HiveEntrance(out hiveX, out hiveY))
+            {
+                // Garden bees fly home to the hive between flowers.
+                flyer.Flower = -2;
+                flyer.TargetX = hiveX;
+                flyer.TargetY = hiveY;
+                return;
+            }
             if (showGarden && garden.Count > 0 && (flowersOnly || random.NextDouble() < 0.6))
             {
                 int pick = random.Next(garden.Count);
@@ -167,8 +187,8 @@ namespace SnowDesk
             double distance = Math.Sqrt(dx * dx + dy * dy);
             if (distance < 3 * S)
             {
-                bee.Rest = bee.Flower >= 0 ? 1.2 + scene.Random.NextDouble() * 1.6 : 0.01;
-                if (bee.Flower < 0) ChooseTarget(bee, true);
+                bee.Rest = bee.Flower != -1 ? 1.2 + scene.Random.NextDouble() * 1.6 : 0.01;
+                if (bee.Flower == -1) ChooseTarget(bee, true);
                 return;
             }
             double speed = 120 * S;
@@ -225,6 +245,7 @@ namespace SnowDesk
 
         public void DrawBack(Canvas canvas)
         {
+            orchard.DrawBack(canvas);
             if (!showGarden) return;
             double sway = Math.Max(-1.6, Math.Min(1.6, scene.Wind / 30.0));
             foreach (Bloom bloom in garden)
@@ -238,6 +259,7 @@ namespace SnowDesk
 
         public void DrawFront(Canvas canvas)
         {
+            orchard.DrawFront(canvas);
             if (gardener != Stage.Away)
             {
                 bool busy = gardener == Stage.Busy;

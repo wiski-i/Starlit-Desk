@@ -33,9 +33,6 @@ namespace SnowDesk
         private static readonly Pen PetalVein = UnitPen(Color.FromArgb(70, 200, 100, 140), 0.04f);
         private static readonly Pen Stem = UnitPen(Color.FromArgb(150, 92, 58, 32), 0.06f);
 
-        private static readonly Brush PumpkinFill = DecorationArt.Ramp(-26, 0, Color.FromArgb(246, 150, 52), Color.FromArgb(198, 88, 26));
-        private static readonly Brush PumpkinRib = DecorationArt.Ramp(-26, 0, Color.FromArgb(232, 124, 40), Color.FromArgb(170, 70, 22));
-        private static readonly Brush PumpkinStem = DecorationArt.Ramp(-32, -22, Color.FromArgb(128, 140, 70), Color.FromArgb(82, 92, 44));
         private static readonly Brush LeafGreen = DecorationArt.Ramp(-40, 0, Color.FromArgb(120, 182, 92), Color.FromArgb(56, 120, 62));
         private static readonly Brush DaisyPetal = DecorationArt.Ramp(-40, -20, Color.FromArgb(255, 255, 252), Color.FromArgb(226, 224, 236));
         private static readonly Brush DaisyHeart = DecorationArt.Ramp(-34, -26, Color.FromArgb(252, 214, 80), Color.FromArgb(222, 150, 30));
@@ -46,7 +43,6 @@ namespace SnowDesk
             DecorationArt.Ramp(-44, -28, Color.FromArgb(178, 128, 222), Color.FromArgb(112, 70, 170))
         };
         private static readonly Pen Crease = Line(Color.FromArgb(110, 36, 35, 40), 0.8f);
-        private static readonly Pen Vine = Line(Color.FromArgb(96, 120, 56), 1.1f);
         private static readonly Pen StemLine = Line(Color.FromArgb(84, 140, 70), 1.6f);
         private static readonly Pen Blade = Line(Color.FromArgb(96, 164, 82), 1.4f);
         private static readonly Pen BladeDark = Line(Color.FromArgb(64, 128, 66), 1.3f);
@@ -137,39 +133,6 @@ namespace SnowDesk
             return path;
         }
 
-        /// <summary>A ribbed pumpkin sitting on (0, 0), about 26 px tall at size 1.</summary>
-        internal static void Pumpkin(Graphics g, float size)
-        {
-            g.ScaleTransform(size, size);
-            g.FillEllipse(PumpkinRib, -22, -24, 20, 24);
-            g.FillEllipse(PumpkinRib, 2, -24, 20, 24);
-            g.DrawEllipse(Crease, -22, -24, 20, 24);
-            g.DrawEllipse(Crease, 2, -24, 20, 24);
-            g.FillEllipse(PumpkinFill, -13, -26, 26, 26);
-            g.DrawEllipse(Crease, -13, -26, 26, 26);
-            g.DrawBezier(Crease, -4, -25, -6, -18, -6, -8, -4, -1);
-            g.DrawBezier(Crease, 4, -25, 6, -18, 6, -8, 4, -1);
-            g.DrawArc(Shine, -9, -22, 10, 16, 190, 60);
-            using (var stem = new GraphicsPath())
-            {
-                stem.AddBezier(-2, -24, -2.6f, -29, -1, -32, 2.6f, -33);
-                stem.AddLine(2.6f, -33, 3.4f, -30);
-                stem.AddBezier(3.4f, -30, 1.6f, -29, 2, -27, 2.4f, -24);
-                stem.CloseFigure();
-                g.FillPath(PumpkinStem, stem);
-                g.DrawPath(Crease, stem);
-            }
-            g.DrawBezier(Vine, 2.6f, -28, 8, -32, 12, -27, 9, -25);
-            using (var leaf = new GraphicsPath())
-            {
-                leaf.AddBezier(-3, -27, -9, -33, -15, -29, -14, -24);
-                leaf.AddBezier(-14, -24, -10, -25, -6, -24, -3, -27);
-                leaf.CloseFigure();
-                g.FillPath(LeafGreen, leaf);
-                g.DrawPath(Crease, leaf);
-            }
-        }
-
         /// <summary>A raked heap of leaves; <paramref name="amount"/> 0..1 grows it from a few leaves to a dome.</summary>
         internal static void Heap(Graphics g, double amount, int seed, float scale)
         {
@@ -258,6 +221,13 @@ namespace SnowDesk
                 float bend = (float)(sway * (0.6 + random.NextDouble() * 0.8) + (random.NextDouble() - 0.5) * 3);
                 g.DrawBezier(i % 2 == 0 ? Blade : BladeDark, root, 0, root, -tall * 0.4f, root + bend * 0.4f, -tall * 0.8f, root + bend, -tall);
             }
+        }
+
+        /// <summary>A soft grey exhaust puff of radius r centred on (0, 0).</summary>
+        internal static void Smoke(Graphics g, float r, int alpha)
+        {
+            using (var puff = new SolidBrush(Color.FromArgb(Math.Max(0, Math.Min(255, alpha)), 196, 196, 200)))
+                g.FillEllipse(puff, -r, -r, r * 2, r * 2);
         }
 
         private static Brush Unit(Color light, Color dark)

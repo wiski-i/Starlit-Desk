@@ -32,6 +32,18 @@ namespace SnowDesk
         private static readonly Brush Navy = DecorationArt.Ramp(-6, 4, Color.FromArgb(52, 64, 108), Color.FromArgb(24, 30, 58));
         private static readonly Brush WhiteBelly = Ink(246, 242, 236);
         private static readonly Brush Throat = Ink(200, 92, 64);
+        private static readonly Brush HiveFill = DecorationArt.Ramp(-2, 28, Color.FromArgb(232, 196, 120), Color.FromArgb(176, 128, 66));
+        private static readonly Brush Honey = new SolidBrush(Color.FromArgb(220, 236, 168, 40));
+        private static readonly Brush CarPaint = DecorationArt.Ramp(-34, -8, Color.FromArgb(226, 72, 64), Color.FromArgb(150, 34, 40));
+        private static readonly Brush CarGlass = DecorationArt.Ramp(-31, -22, Color.FromArgb(176, 210, 222), Color.FromArgb(96, 140, 162));
+        private static readonly Brush TailLight = Ink(176, 36, 40);
+        private static readonly Brush Suit = DecorationArt.Ramp(-80, 0, Color.FromArgb(250, 250, 246), Color.FromArgb(206, 208, 204));
+        private static readonly Brush SuitFar = Ink(196, 198, 194);
+        private static readonly Brush Glove = Ink(232, 196, 92);
+        private static readonly Brush Veil = new SolidBrush(Color.FromArgb(120, 40, 40, 44));
+        private static readonly Brush AngryEye = Ink(214, 40, 40);
+        private static readonly Pen Mesh = Line(Color.FromArgb(70, 20, 20, 24), 0.5f);
+        private static readonly Pen Brow = Line(Color.FromArgb(40, 30, 30), 0.9f);
         private static readonly Pen Crease = Line(Color.FromArgb(110, 36, 35, 40), 0.8f);
         private static readonly Pen Vein = Line(Color.FromArgb(150, 44, 34, 38), 0.6f);
         private static readonly Pen Stripe = Line(Color.FromArgb(48, 36, 30), 1.6f);
@@ -160,8 +172,130 @@ namespace SnowDesk
             g.DrawBezier(Antenna, 0.4f, -4, 1.6f, -7, 3, -9, 3.6f, -9.6f);
         }
 
+        /// <summary>A wild hive hanging from (0, 0); <paramref name="crushed"/> draws the flattened remains on the ground instead.</summary>
+        internal static void Hive(Graphics g, bool crushed, double wobble)
+        {
+            if (crushed)
+            {
+                g.FillEllipse(Honey, -18, -3.4f, 36, 5);
+                g.FillEllipse(HiveFill, -14, -5, 13, 5);
+                g.FillEllipse(HiveFill, 2, -6, 12, 6);
+                g.DrawEllipse(Crease, -14, -5, 13, 5);
+                g.DrawEllipse(Crease, 2, -6, 12, 6);
+                g.FillPolygon(HiveFill, new[] { new PointF(-3, -4), new PointF(1, -9), new PointF(3, -3) });
+                g.DrawLine(Shine, -12, -1.6f, -4, -1.6f);
+                return;
+            }
+            g.RotateTransform((float)wobble);
+            g.DrawLine(Handle, 0, 0, 0, 4);
+            using (var body = new GraphicsPath())
+            {
+                body.AddBezier(0, 3, 7, 3, 10, 10, 10, 15);
+                body.AddBezier(10, 15, 10, 22, 6, 27, 0, 27);
+                body.AddBezier(0, 27, -6, 27, -10, 22, -10, 15);
+                body.AddBezier(-10, 15, -10, 10, -7, 3, 0, 3);
+                body.CloseFigure();
+                g.FillPath(HiveFill, body);
+                GraphicsState state = g.Save();
+                g.SetClip(body, CombineMode.Intersect);
+                for (float y = 8; y < 26; y += 4.6f) g.DrawArc(Crease, -12, y - 2, 24, 5, 0, 180);
+                g.Restore(state);
+                g.DrawPath(Crease, body);
+            }
+            g.FillEllipse(WingDark, -2.4f, 19, 4.8f, 3.6f);
+            g.DrawArc(Shine, -7, 8, 8, 12, 160, 70);
+        }
+
+        /// <summary>A small red car; <paramref name="scared"/> shows the driver wide-eyed as the bees close in.</summary>
+        internal static void Car(Graphics g, double wheels, bool scared)
+        {
+            g.FillRectangle(WingDark, -33, -12, 67, 5);
+            using (var body = DecorationArt.RoundedPolygon(new[] {
+                new PointF(-34, -9), new PointF(-33, -20), new PointF(-20, -22), new PointF(-11, -33), new PointF(11, -33),
+                new PointF(21, -22), new PointF(33, -20), new PointF(36, -11), new PointF(35, -8)
+            }, 0.14f))
+            {
+                g.FillPath(CarPaint, body);
+                g.DrawPath(Crease, body);
+            }
+            g.FillPolygon(CarGlass, new[] { new PointF(-17, -22), new PointF(-9, -30.6f), new PointF(-1, -30.6f), new PointF(-1, -22) });
+            g.FillPolygon(CarGlass, new[] { new PointF(2, -22), new PointF(2, -30.6f), new PointF(10, -30.6f), new PointF(18, -22) });
+            g.DrawLine(Shine, -11, -28.4f, -7, -24);
+            g.FillEllipse(Skin, 4.4f, -30, 7, 7.4f);
+            g.FillPie(WingDark, 4, -31, 7.6f, 5, 180, 180);
+            if (scared)
+            {
+                g.FillEllipse(Glint, 8.2f, -28.6f, 2.6f, 2.6f);
+                g.FillEllipse(WingDark, 8.9f, -27.9f, 1.2f, 1.2f);
+                g.FillEllipse(WingDark, 9.2f, -24.8f, 1.6f, 1.8f);
+            }
+            else g.FillEllipse(Eye, 8.6f, -27.6f, 1.4f, 1.5f);
+            g.DrawLine(Crease, 0.4f, -22, 0.4f, -10);
+            g.DrawLine(Crease, 5, -18, 8, -18);
+            g.FillEllipse(Honey, 31.6f, -18, 4, 3.4f);
+            g.FillRectangle(TailLight, -34.4f, -18, 2.4f, 3.6f);
+            g.DrawLine(Shine, -28, -19.6f, 28, -19);
+            DecorationArt.Wheel(g, -20, wheels);
+            DecorationArt.Wheel(g, 22, wheels);
+        }
+
+        /// <summary>
+        /// A beekeeper in a white suit and veiled hat. Pose 0 walks carrying a new hive, 1 reaches up to hang
+        /// it, 2 walks away empty-handed.
+        /// </summary>
+        internal static void Beekeeper(Graphics g, double phase, int pose)
+        {
+            float swing = pose != 1 ? (float)Math.Cos(phase * Math.PI) : 0;
+            Leg(g, SuitFar, -swing * 8);
+            Leg(g, Suit, swing * 8);
+            using (var torso = DecorationArt.RoundedPolygon(new[] {
+                new PointF(-7, -56), new PointF(7, -57), new PointF(9, -44), new PointF(8, -29), new PointF(-8, -29), new PointF(-8.4f, -44)
+            }, 0.24f))
+            {
+                g.FillPath(Suit, torso);
+                g.DrawPath(Crease, torso);
+            }
+            g.DrawLine(Crease, 0.6f, -55, 1, -30);
+            var hand = pose == 1 ? new PointF(8, -78) : new PointF(11, -40);
+            if (pose == 0)
+            {
+                GraphicsState state = g.Save();
+                g.TranslateTransform(13, -52);
+                g.ScaleTransform(0.8f, 0.8f);
+                Hive(g, false, 0);
+                g.Restore(state);
+            }
+            SummerArt.Taper(g, Suit, 5, 4, new PointF(-3, -53), new PointF(pose == 1 ? -2 : 4, pose == 1 ? -66 : -44), pose == 1 ? new PointF(2, -78) : hand);
+            SummerArt.Taper(g, Suit, 5, 4, new PointF(4, -53), new PointF(pose == 1 ? 8 : 9, pose == 1 ? -66 : -46), hand);
+            g.FillEllipse(Glove, hand.X - 2.6f, hand.Y - 2.6f, 5.2f, 5.2f);
+            g.FillRectangle(Skin, -1, -60, 4, 4);
+            g.FillEllipse(Skin, -5, -71.6f, 12.6f, 13);
+            g.FillEllipse(Eye, 4, -66, 1.6f, 1.8f);
+            using (var veil = new GraphicsPath())
+            {
+                veil.AddRectangle(new RectangleF(-8, -71, 18, 14));
+                g.FillPath(Veil, veil);
+                for (float x = -6; x < 10; x += 2.6f) g.DrawLine(Mesh, x, -71, x, -57);
+            }
+            g.FillEllipse(Suit, -13, -74, 28, 5.4f);
+            g.DrawEllipse(Crease, -13, -74, 28, 5.4f);
+            using (var crown = new GraphicsPath())
+            {
+                crown.AddBezier(-6, -71.6f, -6.4f, -80, 7.6f, -80.6f, 8, -72);
+                crown.CloseFigure();
+                g.FillPath(Suit, crown);
+                g.DrawPath(Crease, crown);
+            }
+        }
+
         /// <summary>A bumblebee in side view with fast wings.</summary>
         internal static void Bee(Graphics g, double phase)
+        {
+            Bee(g, phase, false);
+        }
+
+        /// <summary>A bumblebee; an angry one frowns and runs hot.</summary>
+        internal static void Bee(Graphics g, double phase, bool angry)
         {
             bool up = Math.Sin(phase * 60) > 0;
             g.FillEllipse(BeeWing, -2, up ? -9 : -6.6f, 6, up ? 6 : 3.6f);
@@ -177,7 +311,8 @@ namespace SnowDesk
                 g.DrawPath(Crease, body);
             }
             g.FillEllipse(WingDark, 3.6f, -3, 5, 5);
-            g.FillEllipse(Glint, 6, -1.8f, 1, 1);
+            g.FillEllipse(angry ? AngryEye : Glint, 6, -1.8f, 1, 1);
+            if (angry) g.DrawLine(Brow, 5, -3.4f, 8, -1.8f);
             g.FillPolygon(WingDark, new[] { new PointF(-6, -0.6f), new PointF(-8.4f, 0), new PointF(-6, 0.8f) });
             g.FillEllipse(BeeWing, 0.6f, up ? -10 : -7, 5, up ? 6.4f : 3.6f);
         }

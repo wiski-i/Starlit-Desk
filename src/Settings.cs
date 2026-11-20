@@ -28,18 +28,20 @@ namespace SnowDesk
         All = 63
     }
 
-    /// <summary>Optional pieces of the autumn theme; stored as the "autumn" bit mask.</summary>
+    /// <summary>Optional pieces of the autumn theme; stored as the "autumn2" bit mask.</summary>
     [Flags]
     internal enum AutumnEffect
     {
         Raker = 1,
         Kid = 2,
         Squirrel = 4,
-        Pumpkins = 8,
-        All = 15
+        Tree = 8,
+        Sweeper = 16,
+        Gale = 32,
+        All = 63
     }
 
-    /// <summary>Optional pieces of the spring theme; stored as the "spring" bit mask.</summary>
+    /// <summary>Optional pieces of the spring theme; stored as the "spring2" bit mask.</summary>
     [Flags]
     internal enum SpringEffect
     {
@@ -48,7 +50,10 @@ namespace SnowDesk
         Gardener = 4,
         Birds = 8,
         Garden = 16,
-        All = 31
+        Tree = 32,
+        Car = 64,
+        Beekeeper = 128,
+        All = 255
     }
 
     internal sealed class Settings
@@ -126,8 +131,8 @@ namespace SnowDesk
                     if (key == "icicles") settings.Icicles = value != 0;
                     if (key == "effects") settings.Effects = (Effect)(value & 31);
                     if (key == "summer") settings.Summer = (SummerEffect)(value & (int)SummerEffect.All);
-                    if (key == "autumn") settings.Autumn = (AutumnEffect)(value & (int)AutumnEffect.All);
-                    if (key == "spring") settings.Spring = (SpringEffect)(value & (int)SpringEffect.All);
+                    if (key == "autumn2") settings.Autumn = (AutumnEffect)(value & (int)AutumnEffect.All);
+                    if (key == "spring2") settings.Spring = (SpringEffect)(value & (int)SpringEffect.All);
                 }
             }
             catch (IOException) { }
@@ -140,7 +145,7 @@ namespace SnowDesk
             Directory.CreateDirectory(Path.GetDirectoryName(filePath));
             string temp = filePath + ".tmp";
             File.WriteAllText(temp, string.Format(CultureInfo.InvariantCulture,
-                "density={0}\nfps={1}\nwind={2}\neffects={3}\nsweep={4}\nledges={5}\nicicles={6}\ntheme={7}\nsummer={8}\nhiddenscreens={9}\nautumn={10}\nspring={11}\n",
+                "density={0}\nfps={1}\nwind={2}\neffects={3}\nsweep={4}\nledges={5}\nicicles={6}\ntheme={7}\nsummer={8}\nhiddenscreens={9}\nautumn2={10}\nspring2={11}\n",
                 Density, Rate, Wind ? 1 : 0, (int)Effects, CursorSweep ? 1 : 0, WindowLedges ? 1 : 0,
                 Icicles ? 1 : 0, Theme.Id, (int)Summer, string.Join("|", HiddenScreens), (int)Autumn, (int)Spring));
             if (File.Exists(filePath)) File.Replace(temp, filePath, null);
